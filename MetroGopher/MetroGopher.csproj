@@ -93,9 +93,9 @@
     <Compile Include="App.xaml.cs">
       <DependentUpon>App.xaml</DependentUpon>
     </Compile>
-    <Compile Include="GopherClient.cs" />
-    <Compile Include="GopherItem.cs" />
-    <Compile Include="LocalizedStrings.cs" />
+    <Compile Include="Services\GopherClient.cs" />
+    <Compile Include="Services\GopherItem.cs" />
+    <Compile Include="Services\LocalizedStrings.cs" />
     <Compile Include="MainPage.xaml.cs">
       <DependentUpon>MainPage.xaml</DependentUpon>
     </Compile>

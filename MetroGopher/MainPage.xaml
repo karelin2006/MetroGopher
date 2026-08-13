@@ -31,30 +31,43 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <!-- Адресная строка -->
-                    <Grid Grid.Row="0" Margin="0,0,0,10">
+                    <!-- Единый блок адресной строки -->
+                    <Grid Grid.Row="0" Margin="12,0,12,10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
+                        <!-- Поле ввода: убираем фиксированную высоту и восстанавливаем дефолтный Padding -->
                         <TextBox x:Name="AddressBox" 
-                                 InputScope="Url" 
-                                 Margin="-10,0,0,0"/>
+             InputScope="Url" 
+             Margin="-12,0,0,0"
+             VerticalAlignment="Center"/>
 
+                        <!-- Кнопка перехода: ровняем строго по высоте TextBox -->
                         <Button Grid.Column="1" 
-                                Content="GO" 
-                                Click="OnGoClick" 
-                                Margin="5,0,0,0"/>
+            Click="OnGoClick" 
+            Width="72"
+            Margin="-14,0,-12,0"
+            Padding="0"
+            VerticalAlignment="Stretch"
+            HorizontalAlignment="Center">
+
+                            <!-- Иконка стрелки -->
+                            <TextBlock Text="&#xE101;" 
+                   FontFamily="Segoe UI Symbol" 
+                   FontSize="26" 
+                   HorizontalAlignment="Center" 
+                   VerticalAlignment="Center"/>
+                        </Button>
                     </Grid>
 
-                    <!-- Список Gophermap с отключенным горизонтальным скроллом -->
+                    <!-- Список Gophermap -->
                     <ListBox x:Name="GopherList" 
                              Grid.Row="1" 
                              SelectionChanged="OnItemSelected"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
 
-                        <!-- Растягиваем элементы ListBox на всю ширину экрана -->
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem">
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -79,7 +92,7 @@
                                                    Margin="0,0,10,0" 
                                                    VerticalAlignment="Top"/>
 
-                                        <!-- Текст / Ссылка с переносом под ширину экрана -->
+                                        <!-- Текст / Ссылка -->
                                         <TextBlock Grid.Column="1" 
                                                    Text="{Binding Title}" 
                                                    FontSize="20" 
@@ -96,7 +109,6 @@
 
             <!-- Вкладка 2: Просмотр текста -->
             <phone:PivotItem Header="{Binding Path=LocalizedResources.PivotDocument, Source={StaticResource LocalizedStrings}}" x:Name="PivotDocument">
-                <!-- Отключаем горизонтальную прокрутку, переносим длинный текст по словам -->
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                     <TextBlock x:Name="TxtDocumentContent" 
                                FontFamily="Courier New" 
@@ -108,6 +120,7 @@
 
         </phone:Pivot>
     </Grid>
+
     <phone:PhoneApplicationPage.ApplicationBar>
         <shell:ApplicationBar IsVisible="True" IsMenuEnabled="True">
             <shell:ApplicationBar.MenuItems>

@@ -23,11 +23,7 @@ namespace MetroGopher
         /// </summary>
         public void UpdateLanguage()
         {
-            var handler = PropertyChanged;
-            if (handler != null)
-            {
-                handler(this, new PropertyChangedEventArgs("LocalizedResources"));
-            }
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("LocalizedResources"));
         }
     }
 }
