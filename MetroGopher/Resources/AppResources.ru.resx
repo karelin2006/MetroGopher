@@ -117,54 +117,37 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="ResourceFlowDirection" xml:space="preserve">
-    <value>LeftToRight</value>
-    <comment>Controls the FlowDirection for all elements in the RootFrame. Set to the traditional direction of this resource file's language</comment>
-  </data>
-  <data name="ResourceLanguage" xml:space="preserve">
-    <value>en-US</value>
-    <comment>Controls the Language and ensures that the font for all elements in the RootFrame aligns with the app's language. Set to the language code of this resource file's language.</comment>
-  </data>
-  <data name="ApplicationTitle" xml:space="preserve">
-    <value>MY APPLICATION</value>
-  </data>
-  <data name="AppBarButtonText" xml:space="preserve">
-    <value>add</value>
-  </data>
-  <data name="AppBarMenuItemText" xml:space="preserve">
-    <value>Menu Item</value>
-  </data>
   <data name="BtnCancel" xml:space="preserve">
-    <value>cancel</value>
+    <value>отмена</value>
   </data>
   <data name="BtnSearch" xml:space="preserve">
-    <value>search</value>
+    <value>найти</value>
   </data>
   <data name="LanguageLabel" xml:space="preserve">
-    <value>Interface Language</value>
+    <value>Язык интерфейса</value>
   </data>
   <data name="MenuSettings" xml:space="preserve">
-    <value>settings</value>
+    <value>настройки</value>
   </data>
   <data name="NetworkError" xml:space="preserve">
-    <value>Network Error</value>
+    <value>Ошибка сети</value>
   </data>
   <data name="PivotDocument" xml:space="preserve">
-    <value>document</value>
+    <value>документ</value>
   </data>
   <data name="PivotMap" xml:space="preserve">
-    <value>map</value>
+    <value>карта</value>
+  </data>
+  <data name="ResourceLanguage" xml:space="preserve">
+    <value>ru-RU</value>
   </data>
   <data name="SearchCaption" xml:space="preserve">
-    <value>GOPHER SEARCH</value>
+    <value>ПОИСК В GOPHER</value>
   </data>
   <data name="SearchPrompt" xml:space="preserve">
-    <value>Enter search query:</value>
+    <value>Введите ваш запрос:</value>
   </data>
   <data name="SettingsTitle" xml:space="preserve">
-    <value>SETTINGS</value>
-  </data>
-  <data name="ErrorTitle" xml:space="preserve">
-    <value>Error</value>
+    <value>НАСТРОЙКИ</value>
   </data>
 </root>
