@@ -1,117 +1,78 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Net;
-using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
-using MetroGopher.Models;
+using Windows.Networking;
+using Windows.Networking.Sockets;
+using Windows.Storage.Streams;
 
 namespace MetroGopher.Services
 {
     public class GopherClient
     {
-        public Task<string> RawRequestAsync(string host, int port, string selector)
+        public async Task<string> RawRequestAsync(string host, int port, string selector, bool forceRefresh = false)
         {
-            var tcs = new TaskCompletionSource<string>();
+            byte[] data = await RawRequestBytesAsync(host, port, selector);
+            if (data == null || data.Length == 0)
+                return string.Empty;
 
-            try
-            {
-                var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                var endpoint = new DnsEndPoint(host, port);
-
-                var connectArgs = new SocketAsyncEventArgs();
-                // В WP Silverlight RemoteEndpoint устанавливается напрямую в args
-                connectArgs.RemoteEndPoint = endpoint;
-
-                connectArgs.Completed += (s, e) =>
-                {
-                    if (e.SocketError != SocketError.Success)
-                    {
-                        tcs.SetException(new Exception("Ошибка подключения: " + e.SocketError));
-                        return;
-                    }
-
-                    byte[] requestBytes = Encoding.UTF8.GetBytes((selector ?? string.Empty) + "\r\n");
-                    var sendArgs = new SocketAsyncEventArgs();
-                    sendArgs.SetBuffer(requestBytes, 0, requestBytes.Length);
-
-                    sendArgs.Completed += (sendSocket, sendE) =>
-                    {
-                        if (sendE.SocketError != SocketError.Success)
-                        {
-                            tcs.SetException(new Exception("Ошибка отправки: " + sendE.SocketError));
-                            return;
-                        }
-
-                        var memoryStream = new MemoryStream();
-                        ReceiveData(socket, memoryStream, tcs);
-                    };
-
-                    if (!socket.SendAsync(sendArgs))
-                    {
-                        if (sendArgs.SocketError == SocketError.Success)
-                        {
-                            var memoryStream = new MemoryStream();
-                            ReceiveData(socket, memoryStream, tcs);
-                        }
-                        else
-                        {
-                            tcs.SetException(new Exception("Ошибка отправки: " + sendArgs.SocketError));
-                        }
-                    }
-                };
-
-                // Вызываем ConnectAsync
-                if (!socket.ConnectAsync(connectArgs))
-                {
-                    if (connectArgs.SocketError != SocketError.Success)
-                    {
-                        tcs.SetException(new Exception("Ошибка подключения: " + connectArgs.SocketError));
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                tcs.SetException(ex);
-            }
-
-            return tcs.Task;
+            return Encoding.UTF8.GetString(data, 0, data.Length);
         }
 
-        private void ReceiveData(Socket socket, MemoryStream memoryStream, TaskCompletionSource<string> tcs)
+        public async Task<byte[]> RawRequestBytesAsync(string host, int port, string selector)
         {
-            byte[] buffer = new byte[2048];
-            var receiveArgs = new SocketAsyncEventArgs();
-            receiveArgs.SetBuffer(buffer, 0, buffer.Length);
+            if (string.IsNullOrWhiteSpace(host))
+                throw new ArgumentException("Host is empty");
 
-            EventHandler<SocketAsyncEventArgs> onReceiveCompleted = null;
-            onReceiveCompleted = (s, e) =>
+            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+            using (var socket = new StreamSocket())
             {
-                if (e.SocketError == SocketError.Success && e.BytesTransferred > 0)
-                {
-                    memoryStream.Write(e.Buffer, e.Offset, e.BytesTransferred);
+                socket.Control.NoDelay = true;
 
-                    if (!socket.ReceiveAsync(receiveArgs))
+                try
+                {
+                    await socket.ConnectAsync(new HostName(host), port.ToString()).AsTask(cts.Token);
+
+                    string request = (selector ?? string.Empty) + "\r\n";
+                    byte[] requestBytes = Encoding.UTF8.GetBytes(request);
+
+                    using (var writer = new DataWriter(socket.OutputStream))
                     {
-                        onReceiveCompleted(socket, receiveArgs);
+                        writer.WriteBytes(requestBytes);
+                        await writer.StoreAsync().AsTask(cts.Token);
+                        await writer.FlushAsync().AsTask(cts.Token);
+                        writer.DetachStream();
+                    }
+
+                    using (var reader = new DataReader(socket.InputStream))
+                    {
+                        reader.InputStreamOptions = InputStreamOptions.Partial;
+                        var ms = new MemoryStream();
+
+                        while (true)
+                        {
+                            uint loaded = await reader.LoadAsync(64 * 1024).AsTask(cts.Token);
+                            if (loaded == 0)
+                                break;
+
+                            byte[] chunk = new byte[loaded];
+                            reader.ReadBytes(chunk);
+                            ms.Write(chunk, 0, (int)loaded);
+                        }
+
+                        return ms.ToArray();
                     }
                 }
-                else
+                catch (TaskCanceledException)
                 {
-                    receiveArgs.Completed -= onReceiveCompleted;
-                    socket.Dispose();
-
-                    string result = Encoding.UTF8.GetString(memoryStream.ToArray(), 0, (int)memoryStream.Length);
-                    tcs.SetResult(result);
+                    throw new TimeoutException($"Сервер {host} не ответил за 15 секунд. Возможно, он отключен.");
                 }
-            };
-
-            receiveArgs.Completed += onReceiveCompleted;
-
-            if (!socket.ReceiveAsync(receiveArgs))
-            {
-                onReceiveCompleted(socket, receiveArgs);
+                catch (Exception ex)
+                {
+                    throw new Exception($"Ошибка сети ({host}): {ex.Message}");
+                }
             }
         }
 
@@ -121,105 +82,179 @@ namespace MetroGopher.Services
             if (string.IsNullOrEmpty(rawResponse))
                 return items;
 
-            var lines = rawResponse.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            var lines = rawResponse.Replace("\r\n", "\n").Replace('\r', '\n')
+                                   .Split(new[] { '\n' }, StringSplitOptions.None);
 
-            string pendingInfoBlock = "";
+            string pendingInfo = null;
 
-            foreach (var line in lines)
+            foreach (var rawLine in lines)
             {
-                if (line == "." || string.IsNullOrWhiteSpace(line))
+                string line = rawLine;
+                if (string.IsNullOrEmpty(line) || line == ".")
+                    continue;
+
+                if (line.Length < 1)
                     continue;
 
                 char typeChar = line[0];
-                string[] parts = line.Substring(1).Split('\t');
+                string rest = line.Length > 1 ? line.Substring(1) : string.Empty;
+                string[] parts = rest.Split('\t');
 
-                if (parts.Length >= 4)
+                string title = parts.Length > 0 ? parts[0] : string.Empty;
+                string selector = parts.Length > 1 ? parts[1] : string.Empty;
+                string host = parts.Length > 2 ? parts[2] : currentHost;
+                int port = currentPort;
+
+                if (parts.Length > 3)
                 {
-                    string title = parts[0];
-                    var itemType = MapType(typeChar);
+                    int parsedPort;
+                    if (int.TryParse(parts[3], out parsedPort) && parsedPort > 0)
+                        port = parsedPort;
+                }
 
-                    // 1. Игнорируем чистый декоративный мусор (разделительные полосы из '=' или '-')
-                    string trimmed = title.Trim();
-                    if (trimmed.StartsWith("===") || trimmed.StartsWith("---") || trimmed.StartsWith("***"))
+                var itemType = MapType(typeChar);
+
+                if (itemType == GopherItemType.HtmlLink)
+                {
+                    if (selector.StartsWith("URL:", StringComparison.OrdinalIgnoreCase))
                     {
-                        continue;
+                        selector = selector.Substring(4);
                     }
+                }
 
-                    // 2. Если это инфо-строка (i) — накапливаем её в общий блок текста
-                    if (itemType == GopherItemType.Info)
+                if (itemType == GopherItemType.Info)
+                {
+                    if (!string.IsNullOrWhiteSpace(title))
                     {
-                        if (!string.IsNullOrWhiteSpace(title))
-                        {
-                            if (pendingInfoBlock.Length > 0)
-                                pendingInfoBlock += " ";
-                            pendingInfoBlock += title;
-                        }
-                        continue;
+                        if (pendingInfo == null)
+                            pendingInfo = title;
+                        else
+                            pendingInfo += "\n" + title;
                     }
+                    continue;
+                }
 
-                    // 3. Если встретили кликабельный элемент (папку/файл), сначала выводим накопленный текст
-                    if (!string.IsNullOrEmpty(pendingInfoBlock))
-                    {
-                        items.Add(new GopherItem
-                        {
-                            ItemType = GopherItemType.Info,
-                            Title = pendingInfoBlock,
-                            Host = currentHost,
-                            Port = currentPort
-                        });
-                        pendingInfoBlock = ""; // Сбрасываем буфер
-                    }
-
-                    // 4. Корректируем null.host / error.host
-                    int itemPort;
-                    int.TryParse(parts[3], out itemPort);
-                    string itemHost = parts[2];
-
-                    if (string.Equals(itemHost, "null.host", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(itemHost, "error.host", StringComparison.OrdinalIgnoreCase) ||
-                        string.IsNullOrWhiteSpace(itemHost))
-                    {
-                        itemHost = currentHost;
-                    }
-
+                if (pendingInfo != null)
+                {
                     items.Add(new GopherItem
                     {
-                        ItemType = itemType,
-                        Title = title,
-                        Selector = parts[1],
-                        Host = itemHost,
-                        Port = itemPort == 0 ? currentPort : itemPort
+                        ItemType = GopherItemType.Info,
+                        Title = pendingInfo,
+                        Host = currentHost,
+                        Port = currentPort,
+                        Selector = ""
                     });
+                    pendingInfo = null;
                 }
+
+                if (string.IsNullOrWhiteSpace(host) ||
+                    host.Equals("null.host", StringComparison.OrdinalIgnoreCase) ||
+                    host.Equals("error.host", StringComparison.OrdinalIgnoreCase))
+                {
+                    host = currentHost;
+                }
+
+                if (port <= 0)
+                    port = currentPort;
+
+                items.Add(new GopherItem
+                {
+                    ItemType = itemType,
+                    Title = title,
+                    Selector = selector,
+                    Host = host,
+                    Port = port
+                });
             }
 
-            // Если в самом конце ответа остался накопленный текст — добавляем его
-            if (!string.IsNullOrEmpty(pendingInfoBlock))
+            if (pendingInfo != null)
             {
                 items.Add(new GopherItem
                 {
                     ItemType = GopherItemType.Info,
-                    Title = pendingInfoBlock,
+                    Title = pendingInfo,
                     Host = currentHost,
-                    Port = currentPort
+                    Port = currentPort,
+                    Selector = ""
                 });
             }
 
             return items;
         }
 
+        public string CleanTextContent(string raw)
+        {
+            if (string.IsNullOrEmpty(raw))
+                return raw;
+
+            // Нормализуем переносы строк для Windows Phone
+            string cleaned = raw.Replace("\r\n", "\n").Replace('\r', '\n');
+
+            cleaned = cleaned.TrimEnd();
+            if (cleaned.EndsWith("\n."))
+                cleaned = cleaned.Substring(0, cleaned.Length - 2);
+            else if (cleaned.EndsWith("."))
+                cleaned = cleaned.Substring(0, cleaned.Length - 1);
+
+            return cleaned;
+        }
+
         private GopherItemType MapType(char typeChar)
         {
             switch (typeChar)
             {
+                // Базовые типы RFC 1436
                 case '0': return GopherItemType.TextFile;
                 case '1': return GopherItemType.Directory;
+                case '2': return GopherItemType.CSOPhone;
+                case '3': return GopherItemType.Error;
+                case '4': return GopherItemType.BinHex;
+                case '5': return GopherItemType.DosBinary;
+                case '6': return GopherItemType.Uuencoded;
                 case '7': return GopherItemType.Search;
-                case 'g':
-                case 'I':
-                case 'p': return GopherItemType.Image;
+                case '8': return GopherItemType.Telnet;
                 case '9': return GopherItemType.Binary;
-                case 'i': return GopherItemType.Info; // Информационный текст (не ссылка)
+
+                // Зеркальные серверы
+                case '+': return GopherItemType.Directory;
+                // Терминальные сессии (tn3270)
+                case 'T': return GopherItemType.Telnet;
+
+                // Изображения (Gopher+)
+                case 'g': // GIF
+                case 'I': // Изображение любого типа
+                case 'p': // PNG или PDF (в зависимости от сервера)
+                case 'P': // Альтернативный маркер PNG/PDF
+                case ':': // Bitmap-картинки
+                    return GopherItemType.Image;
+
+                // Аудио форматы (.wav, .au, .mp3, .ogg)
+                case 's':
+                case 'S':
+                case '<':
+                    return GopherItemType.Binary; // Скачиваем аудио как файл
+
+                // Видео форматы (Movie)
+                case ';':
+                    return GopherItemType.Binary; // Скачиваем видео как файл
+
+                // Документы (Word, RTF, загружаемые PDF) и архивы MIME
+                case 'd':
+                case 'D':
+                case 'M': // MIME multipart
+                    return GopherItemType.Binary; // Безопаснее всего просто скачать
+
+                // Веб-ссылки и HTML-документы
+                case 'h':
+                case 'H':
+                    return GopherItemType.HtmlLink;
+
+                // Информационные строки
+                case 'i': return GopherItemType.Info;
+
+                // Структурированные текстовые данные (XML и т.д.)
+                case 'x': return GopherItemType.TextFile; // Показываем как текст
+
                 default: return GopherItemType.Unknown;
             }
         }

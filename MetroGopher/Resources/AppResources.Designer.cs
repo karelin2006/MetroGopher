@@ -106,6 +106,24 @@ namespace MetroGopher.Resources {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to clear bookmarks.
+        /// </summary>
+        public static string ClearBookmarks {
+            get {
+                return ResourceManager.GetString("ClearBookmarks", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to clear history.
+        /// </summary>
+        public static string ClearHistory {
+            get {
+                return ResourceManager.GetString("ClearHistory", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Error.
         /// </summary>
         public static string ErrorTitle {
@@ -142,11 +160,29 @@ namespace MetroGopher.Resources {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to bookmarks.
+        /// </summary>
+        public static string PivotBookmarks {
+            get {
+                return ResourceManager.GetString("PivotBookmarks", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to document.
         /// </summary>
         public static string PivotDocument {
             get {
                 return ResourceManager.GetString("PivotDocument", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to history.
+        /// </summary>
+        public static string PivotHistory {
+            get {
+                return ResourceManager.GetString("PivotHistory", resourceCulture);
             }
         }
         

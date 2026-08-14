@@ -167,4 +167,16 @@
   <data name="ErrorTitle" xml:space="preserve">
     <value>Error</value>
   </data>
+  <data name="ClearBookmarks" xml:space="preserve">
+    <value>clear bookmarks</value>
+  </data>
+  <data name="ClearHistory" xml:space="preserve">
+    <value>clear history</value>
+  </data>
+  <data name="PivotBookmarks" xml:space="preserve">
+    <value>bookmarks</value>
+  </data>
+  <data name="PivotHistory" xml:space="preserve">
+    <value>history</value>
+  </data>
 </root>

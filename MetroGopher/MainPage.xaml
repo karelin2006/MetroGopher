@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:phone="clr-namespace:Microsoft.Phone.Controls;assembly=Microsoft.Phone"
     xmlns:shell="clr-namespace:Microsoft.Phone.Shell;assembly=Microsoft.Phone"
+    xmlns:toolkit="clr-namespace:Microsoft.Phone.Controls;assembly=Microsoft.Phone.Controls.Toolkit"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
@@ -14,66 +15,70 @@
     shell:SystemTray.IsVisible="True">
 
     <Grid x:Name="LayoutRoot" Background="Transparent">
-        <!-- Индикатор загрузки -->
         <ProgressBar x:Name="LoadingBar" 
                      IsIndeterminate="True" 
                      Visibility="Collapsed" 
                      VerticalAlignment="Top" 
                      Margin="0,-10,0,0"/>
 
-        <phone:Pivot x:Name="MainPivot" Title="METROGOPHER">
+        <phone:Pivot x:Name="MainPivot" Title="METROGOPHER" SelectionChanged="OnPivotSelectionChanged" Loaded="MainPivot_Loaded">
 
-            <!-- Вкладка 1: Gophermap / Список -->
-            <phone:PivotItem Header="{Binding Path=LocalizedResources.PivotMap, Source={StaticResource LocalizedStrings}}">
+            <!-- Tab 1: Gophermap / List -->
+            <phone:PivotItem Header="gopher">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <!-- Единый блок адресной строки -->
                     <Grid Grid.Row="0" Margin="12,0,12,10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
-                        <!-- Поле ввода: убираем фиксированную высоту и восстанавливаем дефолтный Padding -->
-                        <TextBox x:Name="AddressBox" 
-             InputScope="Url" 
-             Margin="-12,0,0,0"
-             VerticalAlignment="Center"/>
+                        <!-- Умный поиск с увеличенным шрифтом -->
+                        <toolkit:AutoCompleteBox x:Name="AddressBox" 
+                                                 InputScope="Url" 
+                                                 Margin="-12,0,0,0"
+                                                 VerticalAlignment="Center" 
+                                                 FilterMode="Contains"
+                                                 MinimumPrefixLength="1"
+                                                 FontSize="26">
+                            <toolkit:AutoCompleteBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" 
+                                               FontSize="26" 
+                                               Margin="12,8"/>
+                                </DataTemplate>
+                            </toolkit:AutoCompleteBox.ItemTemplate>
+                        </toolkit:AutoCompleteBox>
 
-                        <!-- Кнопка перехода: ровняем строго по высоте TextBox -->
                         <Button Grid.Column="1" 
-            Click="OnGoClick" 
-            Width="72"
-            Margin="-14,0,-12,0"
-            Padding="0"
-            VerticalAlignment="Stretch"
-            HorizontalAlignment="Center">
-
-                            <!-- Иконка стрелки -->
+                                Click="OnGoClick" 
+                                Width="72"
+                                Margin="-14,0,-12,0"
+                                Padding="0"
+                                VerticalAlignment="Stretch"
+                                HorizontalAlignment="Center">
                             <TextBlock Text="&#xE101;" 
-                   FontFamily="Segoe UI Symbol" 
-                   FontSize="26" 
-                   HorizontalAlignment="Center" 
-                   VerticalAlignment="Center"/>
+                                       FontFamily="Segoe UI Symbol" 
+                                       FontSize="26" 
+                                       HorizontalAlignment="Center" 
+                                       VerticalAlignment="Center"/>
                         </Button>
                     </Grid>
 
-                    <!-- Список Gophermap -->
                     <ListBox x:Name="GopherList" 
                              Grid.Row="1" 
                              SelectionChanged="OnItemSelected"
+                             toolkit:TiltEffect.IsTiltEnabled="True"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem">
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                             </Style>
                         </ListBox.ItemContainerStyle>
-
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Margin="0,6,0,6" HorizontalAlignment="Stretch">
@@ -82,8 +87,6 @@
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
-
-                                        <!-- Иконка типа элемента -->
                                         <TextBlock Grid.Column="0" 
                                                    Text="{Binding Symbol}" 
                                                    FontFamily="Segoe UI Symbol" 
@@ -91,8 +94,6 @@
                                                    Foreground="{StaticResource PhoneAccentBrush}" 
                                                    Margin="0,0,10,0" 
                                                    VerticalAlignment="Top"/>
-
-                                        <!-- Текст / Ссылка -->
                                         <TextBlock Grid.Column="1" 
                                                    Text="{Binding Title}" 
                                                    FontSize="20" 
@@ -107,25 +108,224 @@
                 </Grid>
             </phone:PivotItem>
 
-            <!-- Вкладка 2: Просмотр текста -->
-            <phone:PivotItem Header="{Binding Path=LocalizedResources.PivotDocument, Source={StaticResource LocalizedStrings}}" x:Name="PivotDocument">
-                <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                    <TextBlock x:Name="TxtDocumentContent" 
-                               FontFamily="Courier New" 
-                               FontSize="18" 
-                               TextWrapping="Wrap" 
-                               Margin="10"/>
-                </ScrollViewer>
+            <!-- Tab 2: Bookmarks (METRO UI REDESIGN) -->
+            <phone:PivotItem Header="bookmarks">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <ListBox x:Name="BookmarksList" 
+                             Grid.Row="0"
+                             Margin="12,0,0,0"
+                             toolkit:TiltEffect.IsTiltEnabled="True"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,24" HorizontalAlignment="Stretch">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- Кнопка перехода с чистым шаблоном (без рамок) -->
+                                    <Button Grid.Column="0"
+                                            Click="OnBookmarkSelected"
+                                            Tag="{Binding}"
+                                            Margin="0"
+                                            Padding="0"
+                                            HorizontalContentAlignment="Left">
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <Grid Background="Transparent">
+                                                    <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </ControlTemplate>
+                                        </Button.Template>
+
+                                        <StackPanel Margin="0">
+                                            <TextBlock Text="{Binding Title}" 
+                                                       FontFamily="{StaticResource PhoneFontFamilySemiLight}"
+                                                       FontSize="32"
+                                                       Margin="0,0,0,-4"
+                                                       TextWrapping="NoWrap" 
+                                                       TextTrimming="WordEllipsis"
+                                                       Foreground="{StaticResource PhoneForegroundBrush}"/>
+                                            <TextBlock Text="{Binding Host}" 
+                                                       Style="{StaticResource PhoneTextSubtleStyle}" 
+                                                       Margin="2,0,0,0"
+                                                       Foreground="{StaticResource PhoneAccentBrush}"/>
+                                        </StackPanel>
+                                    </Button>
+
+                                    <!-- Иконка удаления (Стиль: корзина) -->
+                                    <Button Grid.Column="1" 
+                                            Click="OnDeleteBookmarkClick" 
+                                            Tag="{Binding}" 
+                                            Width="64" Height="64"
+                                            Margin="12,0,0,0"
+                                            Padding="0"
+                                            VerticalAlignment="Center">
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <Grid Background="Transparent">
+                                                    <TextBlock Text="&#xE107;" 
+                                                               FontFamily="Segoe UI Symbol" 
+                                                               FontSize="24" 
+                                                               Foreground="{StaticResource PhoneSubtleBrush}" 
+                                                               HorizontalAlignment="Center" 
+                                                               VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </ControlTemplate>
+                                        </Button.Template>
+                                    </Button>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <Button Grid.Row="1" 
+                            Content="clear bookmarks" 
+                            Click="OnClearBookmarksClick" 
+                            Margin="0,10,0,0"/>
+                </Grid>
             </phone:PivotItem>
 
+            <!-- Tab 3: History (METRO UI REDESIGN) -->
+            <phone:PivotItem Header="history">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <ListBox x:Name="HistoryList" 
+                             Grid.Row="0"
+                             Margin="12,0,0,0"
+                             toolkit:TiltEffect.IsTiltEnabled="True"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,24" HorizontalAlignment="Stretch">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- Кнопка перехода с двухстрочным оформлением (как в закладках) -->
+                                    <Button Grid.Column="0"
+                                            Click="OnHistorySelected"
+                                            Tag="{Binding}"
+                                            Margin="0"
+                                            Padding="0"
+                                            HorizontalContentAlignment="Left">
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <Grid Background="Transparent">
+                                                    <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </ControlTemplate>
+                                        </Button.Template>
+
+                                        <StackPanel Margin="0">
+                                            <!-- Основной текст (полный адрес или путь) -->
+                                            <TextBlock Text="{Binding Path}" 
+                                                       FontFamily="{StaticResource PhoneFontFamilySemiLight}"
+                                                       FontSize="28"
+                                                       Margin="0,0,0,-2"
+                                                       TextWrapping="NoWrap" 
+                                                       TextTrimming="WordEllipsis"
+                                                       Foreground="{StaticResource PhoneForegroundBrush}"/>
+                                            <!-- Подзаголовок (Хост) акцентным цветом -->
+                                            <TextBlock Text="{Binding Host}" 
+                                                       Style="{StaticResource PhoneTextSubtleStyle}" 
+                                                       Margin="2,0,0,0"
+                                                       Foreground="{StaticResource PhoneAccentBrush}"/>
+                                        </StackPanel>
+                                    </Button>
+
+                                    <!-- Иконка удаления (корзина) -->
+                                    <Button Grid.Column="1" 
+                                            Click="OnDeleteHistoryItemClick" 
+                                            Tag="{Binding}" 
+                                            Width="64" Height="64"
+                                            Margin="12,0,0,0"
+                                            Padding="0"
+                                            VerticalAlignment="Center">
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <Grid Background="Transparent">
+                                                    <TextBlock Text="&#xE107;" 
+                                                               FontFamily="Segoe UI Symbol" 
+                                                               FontSize="24" 
+                                                               Foreground="{StaticResource PhoneSubtleBrush}" 
+                                                               HorizontalAlignment="Center" 
+                                                               VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </ControlTemplate>
+                                        </Button.Template>
+                                    </Button>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <Button Grid.Row="1" 
+                            Content="clear history" 
+                            Click="OnClearHistoryClick" 
+                            Margin="0,10,0,0"/>
+                </Grid>
+            </phone:PivotItem>
+
+            <!-- Tab 4: Document Viewer (Стабильный режим с нарезкой) -->
+            <phone:PivotItem Header="document" x:Name="PivotDocument">
+                <ListBox x:Name="DocumentListBox" 
+                         Margin="10,0,10,0"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Padding" Value="0"/>
+                            <Setter Property="Margin" Value="0"/>
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}" 
+                                       FontFamily="Consolas" 
+                                       FontSize="18" 
+                                       LineHeight="22"
+                                       Margin="0"
+                                       Padding="0"
+                                       TextWrapping="Wrap"/>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </phone:PivotItem>
         </phone:Pivot>
     </Grid>
 
+    <!-- ApplicationBar -->
+    <!-- ApplicationBar -->
     <phone:PhoneApplicationPage.ApplicationBar>
-        <shell:ApplicationBar IsVisible="True" IsMenuEnabled="True">
-            <shell:ApplicationBar.MenuItems>
-                <shell:ApplicationBarMenuItem Text="English" Click="OnToggleLanguageClick" />
-            </shell:ApplicationBar.MenuItems>
+
+        <shell:ApplicationBar IsVisible="True" IsMenuEnabled='True' BackgroundColor="#1F1F1F" ForegroundColor="White">
+            <shell:ApplicationBarIconButton IconUri="/Assets/transport.repeat.png" Text="refresh" Click="OnRefreshClick" />
+            <!-- Новая кнопка "Домой" -->
+            <shell:ApplicationBarIconButton IconUri="/Assets/outline.squares.png" Text="home" Click="OnHomeClick" />
+            <!-- Существующая кнопка "Закладки" -->
+            <shell:ApplicationBarIconButton IconUri="/Assets/notes.png" Text="bookmark" Click="OnBookmarkClick" />
         </shell:ApplicationBar>
     </phone:PhoneApplicationPage.ApplicationBar>
 </phone:PhoneApplicationPage>

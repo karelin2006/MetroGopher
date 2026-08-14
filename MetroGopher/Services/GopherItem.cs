@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace MetroGopher.Models
+namespace MetroGopher.Services
 {
     public enum GopherItemType
     {
@@ -16,6 +16,7 @@ namespace MetroGopher.Models
         Binary,     // '9'
         Image,      // 'g', 'I'
         Info,       // 'i'
+        HtmlLink,   // 'h', 'H'
         Unknown
     }
 
@@ -27,10 +28,8 @@ namespace MetroGopher.Models
         public string Host { get; set; }
         public int Port { get; set; }
 
-        // Проверяем, кликабельный ли элемент
         public bool IsClickable => ItemType != GopherItemType.Info && ItemType != GopherItemType.Unknown;
 
-        // Проверяем, просто ли это инфо-текст
         public bool IsInfo => ItemType == GopherItemType.Info || ItemType == GopherItemType.Unknown;
 
         public string Symbol
@@ -39,12 +38,13 @@ namespace MetroGopher.Models
             {
                 switch (ItemType)
                 {
-                    case GopherItemType.Directory: return "\uE14C"; // Папка
-                    case GopherItemType.TextFile: return "\uE160"; // Документ
-                    case GopherItemType.Search: return "\uE11A"; // Поиск
-                    case GopherItemType.Image: return "\uE114"; // Картинка
-                    case GopherItemType.Binary: return "\uE125"; // Файл
-                    default: return "\uE128"; // Веб-ссылка
+                    case GopherItemType.Directory: return "\uE14C";
+                    case GopherItemType.TextFile: return "\uE160";
+                    case GopherItemType.Search: return "\uE11A";
+                    case GopherItemType.Image: return "\uE114";
+                    case GopherItemType.Binary: return "\uE125";
+                    case GopherItemType.HtmlLink: return "\uE128";
+                    default: return "\uE128";
                 }
             }
         }
