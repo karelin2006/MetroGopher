@@ -68,5 +68,12 @@ namespace MetroGopher.Services
                 }
             }
         }
+
+        public class FormattedTextLine
+        {
+            public string Text { get; set; }
+            public bool IsAsciiArt { get; set; }
+        }
     }
+
 }

@@ -15,6 +15,7 @@
     shell:SystemTray.IsVisible="True">
 
     <Grid x:Name="LayoutRoot" Background="Transparent">
+        <MediaElement x:Name="AudioPlayer" AutoPlay="True" Volume="1.0" Visibility="Collapsed" />
         <ProgressBar x:Name="LoadingBar" 
                      IsIndeterminate="True" 
                      Visibility="Collapsed" 
@@ -288,11 +289,12 @@
                 </Grid>
             </phone:PivotItem>
 
-            <!-- Tab 4: Document Viewer (Стабильный режим с нарезкой) -->
+            <!-- Tab 4: Document Viewer (Без горизонтального скролла) -->
             <phone:PivotItem Header="document" x:Name="PivotDocument">
                 <ListBox x:Name="DocumentListBox" 
-                         Margin="10,0,10,0"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+             Margin="10,0,10,0"
+             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+             ScrollViewer.VerticalScrollBarVisibility="Auto">
                     <ListBox.ItemContainerStyle>
                         <Style TargetType="ListBoxItem">
                             <Setter Property="Padding" Value="0"/>
@@ -302,13 +304,11 @@
                     </ListBox.ItemContainerStyle>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding}" 
-                                       FontFamily="Consolas" 
-                                       FontSize="18" 
-                                       LineHeight="22"
-                                       Margin="0"
-                                       Padding="0"
-                                       TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding Text}" 
+                           FontFamily="Consolas" 
+                           FontSize="{Binding FontSize}" 
+                           LineHeight="{Binding LineHeight}"
+                           TextWrapping="{Binding WrappingMode}"/>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
@@ -316,7 +316,6 @@
         </phone:Pivot>
     </Grid>
 
-    <!-- ApplicationBar -->
     <!-- ApplicationBar -->
     <phone:PhoneApplicationPage.ApplicationBar>
 

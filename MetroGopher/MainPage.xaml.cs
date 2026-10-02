@@ -24,7 +24,7 @@ namespace MetroGopher
         private readonly Stack<GopherHistoryItem> _historyStack = new Stack<GopherHistoryItem>();
         private bool _isNavigatingHistory = false;
 
-        private string _currentHost = "gopher.floodgap.com";
+        private string _currentHost = "gopher.debene.dev";
         private int _currentPort = 70;
         private string _currentSelector = "";
 
@@ -34,14 +34,14 @@ namespace MetroGopher
 
         private readonly string[] _knownGopherServers =
         {
-            "gopher.floodgap.com", "sdf.org", "gopher.viste.fr",
+            "gopher.debene.dev", "gopher.floodgap.com", "sdf.org", "gopher.viste.fr",
             "bitreich.org", "quux.org", "gopher.black",
             "gopher.navigo.com", "1436.ninja", "gopher.club",
             "gopher.ddis.ch", "gopher.fman.com", "hngopher.com",
             "gopher.linkerror.com", "magical.city", "gopher.tildeverse.org",
             "gopher.icu", "gopher.top", "gopher.me",
             "phreaknet.org", "gopher.somnolescent.net", "gopher.stgraber.org",
-            "gopher.osmz.ru", "gopher.space", "gopher.debene.dev"
+            "gopher.osmz.ru", "gopher.space"
         };
 
         private ObservableCollection<GopherBookmark> _bookmarks = new ObservableCollection<GopherBookmark>();
@@ -90,31 +90,45 @@ namespace MetroGopher
                 return;
             }
 
-            var blocks = new List<string>();
-            var sb = new StringBuilder();
-            int lineCount = 0;
+            var rawLines = text.Split(new[] { '\n' }, StringSplitOptions.None);
 
-            var lines = text.Split(new[] { '\n' }, StringSplitOptions.None);
-            foreach (var line in lines)
+            // Умный анализатор: определяем, является ли документ ASCII-картой/схемой
+            bool isAsciiMap = DetectIfAsciiMap(rawLines);
+
+            var items = new List<FormattedTextLine>();
+            foreach (var line in rawLines)
             {
-                sb.AppendLine(line);
-                lineCount++;
-
-                if (lineCount >= 40)
+                items.Add(new FormattedTextLine
                 {
-                    blocks.Add(sb.ToString().TrimEnd('\r', '\n'));
-                    sb.Clear();
-                    lineCount = 0;
+                    Text = line,
+                    IsAsciiArt = isAsciiMap
+                });
+            }
+
+            DocumentListBox.ItemsSource = items;
+            MainPivot.SelectedItem = PivotDocument;
+        }
+
+        private bool DetectIfAsciiMap(string[] lines)
+        {
+            int asciiIndicators = 0;
+            int sampleCount = Math.Min(lines.Length, 60);
+
+            for (int i = 0; i < sampleCount; i++)
+            {
+                string line = lines[i];
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+                // Характерные символы путей, стрелок, станций и ASCII-графики
+                int mapChars = line.Count(c => c == '=' || c == '|' || c == '+' || c == '-' || c == '/' || c == '\\' || c == '[' || c == ']' || c == '<' || c == '>');
+
+                if (mapChars >= 6 || line.Contains("===") || line.Contains("---") || line.Contains("..."))
+                {
+                    asciiIndicators++;
                 }
             }
 
-            if (sb.Length > 0)
-            {
-                blocks.Add(sb.ToString().TrimEnd('\r', '\n'));
-            }
-
-            DocumentListBox.ItemsSource = blocks;
-            MainPivot.SelectedItem = PivotDocument;
+            return asciiIndicators > (sampleCount * 0.15);
         }
 
         #endregion
@@ -231,7 +245,6 @@ namespace MetroGopher
             string input = AddressBox.Text.Trim();
             if (string.IsNullOrWhiteSpace(input)) return;
 
-            // Если ввели одно слово без спецсимволов — отправляем во всемирный поиск Veronica-2
             if (!input.Contains(".") && !input.Contains(":") && !input.Contains("/"))
             {
                 string searchHost = "gopher.floodgap.com";
@@ -292,7 +305,6 @@ namespace MetroGopher
             LoadingBar.Visibility = Visibility.Visible;
             _gopherItems.Clear();
 
-            // Очищаем отображение поисковых табуляций из адресной строки для читаемости
             string displaySelector = selector;
             if (displaySelector.Contains("\t"))
             {
@@ -312,7 +324,6 @@ namespace MetroGopher
 
             try
             {
-                // Загружаем директорию с поддержкой различных кодировок
                 string rawData = await _client.FetchTextAsync(host, port, selector);
                 var items = _client.ParseMenu(rawData, host, port);
 
@@ -366,6 +377,10 @@ namespace MetroGopher
                     await OpenImageAsync(item);
                     break;
 
+                case GopherItemType.Audio:
+                    await PlayAudioAsync(item);
+                    break;
+
                 case GopherItemType.HtmlLink:
                     OpenWebLink(item);
                     break;
@@ -387,7 +402,6 @@ namespace MetroGopher
                 case GopherItemType.DosBinary:
                 case GopherItemType.BinHex:
                 case GopherItemType.Uuencoded:
-                case GopherItemType.Audio:
                 case GopherItemType.Video:
                 case GopherItemType.Document:
                     await DownloadAndSaveFileAsync(item);
@@ -423,7 +437,7 @@ namespace MetroGopher
         private async Task OpenTextFileAsync(GopherItem item)
         {
             LoadingBar.Visibility = Visibility.Visible;
-            DocumentListBox.ItemsSource = new List<string> { "Loading..." };
+            DocumentListBox.ItemsSource = new List<FormattedTextLine> { new FormattedTextLine { Text = "Loading...", IsAsciiArt = false } };
 
             SaveToPermanentHistory(item.Host, item.Port, item.Selector, item.ItemType);
 
@@ -451,7 +465,7 @@ namespace MetroGopher
             }
             catch (Exception ex)
             {
-                DocumentListBox.ItemsSource = new List<string> { "Ошибка загрузки." };
+                DocumentListBox.ItemsSource = new List<FormattedTextLine> { new FormattedTextLine { Text = "Ошибка загрузки.", IsAsciiArt = false } };
                 MessageBox.Show("Не удалось открыть файл:\n" + ex.Message, "Error", MessageBoxButton.OK);
             }
             finally
@@ -497,7 +511,7 @@ namespace MetroGopher
                 var imageDialog = new CustomMessageBox
                 {
                     Caption = item.Title ?? "IMAGE VIEWER",
-                    Message = $"{bitmap.PixelWidth}x{bitmap.PixelHeight} ({FormatSize(imgBytes.Length)})",
+                    Message = string.Format("{0}x{1} ({2})", bitmap.PixelWidth, bitmap.PixelHeight, FormatSize(imgBytes.Length)),
                     Content = scroll,
                     LeftButtonContent = "save",
                     RightButtonContent = "close"
@@ -516,6 +530,57 @@ namespace MetroGopher
             catch (Exception ex)
             {
                 MessageBox.Show("Не удалось загрузить картинку:\n" + ex.Message, "Image Error", MessageBoxButton.OK);
+            }
+            finally
+            {
+                LoadingBar.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private async Task PlayAudioAsync(GopherItem item)
+        {
+            LoadingBar.Visibility = Visibility.Visible;
+            try
+            {
+                byte[] audioBytes = await _client.RawRequestBytesAsync(item.Host, item.Port, item.Selector);
+                if (audioBytes == null || audioBytes.Length == 0)
+                {
+                    MessageBox.Show("Файл пуст или недоступен.", "Audio Error", MessageBoxButton.OK);
+                    return;
+                }
+
+                string tempFileName = "temp_audio.mp3";
+                using (var store = IsolatedStorageFile.GetUserStoreForApplication())
+                {
+                    if (store.FileExists(tempFileName))
+                        store.DeleteFile(tempFileName);
+
+                    using (var stream = store.CreateFile(tempFileName))
+                    {
+                        stream.Write(audioBytes, 0, audioBytes.Length);
+                    }
+
+                    using (var readStream = store.OpenFile(tempFileName, FileMode.Open, FileAccess.Read))
+                    {
+                        AudioPlayer.SetSource(readStream);
+                        AudioPlayer.Play();
+                    }
+                }
+
+                var res = MessageBox.Show(
+                    string.Format("Играет: {0}\nРазмер: {1}\n\nОстановить воспроизведение или сохранить?",
+                        item.Title ?? "Audio", FormatSize(audioBytes.Length)),
+                    "Gopher Music Player",
+                    MessageBoxButton.OKCancel);
+
+                if (res == MessageBoxResult.Cancel)
+                {
+                    AudioPlayer.Stop();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Ошибка воспроизведения:\n" + ex.Message, "Player Error", MessageBoxButton.OK);
             }
             finally
             {
@@ -550,17 +615,15 @@ namespace MetroGopher
 
         private async void OpenTelnet(GopherItem item)
         {
-            string telnetUri = $"telnet://{item.Host}:{item.Port}";
+            string telnetUri = string.Format("telnet://{0}:{1}", item.Host, item.Port);
             try
             {
-                // Попытка запустить ассоциированное приложение в системе
                 await Windows.System.Launcher.LaunchUriAsync(new Uri(telnetUri));
             }
             catch
             {
-                // Если эмулятор telnet не установлен — показываем реквизиты сессии (RFC 1436 разд. 3.8)
                 MessageBox.Show(
-                    $"Сессия Telnet:\nХост: {item.Host}\nПорт: {item.Port}\nЛогин/селектор: {item.Selector}\n\nДля подключения воспользуйтесь внешним клиентом Telnet.",
+                    string.Format("Сессия Telnet:\nХост: {0}\nПорт: {1}\nЛогин/селектор: {2}\n\nДля подключения воспользуйтесь внешним клиентом Telnet.", item.Host, item.Port, item.Selector),
                     "Telnet Connection",
                     MessageBoxButton.OK);
             }
@@ -581,7 +644,7 @@ namespace MetroGopher
             var dialog = new CustomMessageBox
             {
                 Caption = "CSO PHONEBOOK (RFC 1436)",
-                Message = $"Поиск абонента на {item.Host}:",
+                Message = string.Format("Поиск абонента на {0}:", item.Host),
                 Content = searchInput,
                 LeftButtonContent = "search",
                 RightButtonContent = "cancel"
@@ -606,7 +669,6 @@ namespace MetroGopher
             LoadingBar.Visibility = Visibility.Visible;
             try
             {
-                // Команда протокола CSO: "query <запрос>"
                 string csoQuery = "query " + query;
                 string result = await _client.FetchTextAsync(host, port, csoQuery);
                 DisplayLongText(result);
@@ -649,7 +711,6 @@ namespace MetroGopher
                     string query = searchInput.Text.Trim();
                     if (!string.IsNullOrEmpty(query))
                     {
-                        // Согласно RFC 1436: <selector>\t<query>
                         string searchSelector = selectedItem.Selector + "\t" + query;
                         LoadGopherPage(selectedItem.Host, selectedItem.Port, searchSelector);
                     }
@@ -684,7 +745,7 @@ namespace MetroGopher
 
                     while (store.FileExists(fullPath))
                     {
-                        fullPath = "Downloads\\" + nameWithoutExt + "_" + counter + ext;
+                        fullPath = string.Format("Downloads\\{0}_{1}{2}", nameWithoutExt, counter, ext);
                         counter++;
                     }
 
@@ -695,7 +756,7 @@ namespace MetroGopher
                 }
 
                 MessageBox.Show(
-                    "Файл сохранен в Downloads:\n" + fileName + "\n\nРазмер: " + FormatSize(data.Length),
+                    string.Format("Файл сохранен в Downloads:\n{0}\n\nРазмер: {1}", fileName, FormatSize(data.Length)),
                     "Загрузка завершена",
                     MessageBoxButton.OK);
             }
@@ -844,7 +905,7 @@ namespace MetroGopher
             if (_currentDocument == null) return;
 
             LoadingBar.Visibility = Visibility.Visible;
-            DocumentListBox.ItemsSource = new List<string> { "Loading..." };
+            DocumentListBox.ItemsSource = new List<FormattedTextLine> { new FormattedTextLine { Text = "Loading...", IsAsciiArt = false } };
 
             try
             {
@@ -869,7 +930,7 @@ namespace MetroGopher
             }
             catch (Exception ex)
             {
-                DocumentListBox.ItemsSource = new List<string> { "Load failed." };
+                DocumentListBox.ItemsSource = new List<FormattedTextLine> { new FormattedTextLine { Text = "Load failed.", IsAsciiArt = false } };
                 MessageBox.Show("Не удалось обновить документ:\n" + ex.Message, "Error", MessageBoxButton.OK);
             }
             finally
@@ -1069,7 +1130,7 @@ namespace MetroGopher
             }
 
             AddressBox.Text = "";
-            string homeHost = "gopher.floodgap.com";
+            string homeHost = "gopher.debene.dev";
             int homePort = 70;
             string homeSelector = "";
 
@@ -1081,5 +1142,44 @@ namespace MetroGopher
         }
 
         #endregion
+    }
+
+    public class FormattedTextLine
+    {
+        public string Text { get; set; }
+        public bool IsAsciiArt { get; set; }
+
+        public TextWrapping WrappingMode
+        {
+            get { return IsAsciiArt ? TextWrapping.NoWrap : TextWrapping.Wrap; }
+        }
+
+        public double FontSize
+        {
+            get { return IsAsciiArt ? 11.0 : 17.0; }
+        }
+
+        public double LineHeight
+        {
+            get { return IsAsciiArt ? 13.0 : 22.0; }
+        }
+    }
+
+    public class GopherHistoryItem
+    {
+        public string Host { get; set; }
+        public int Port { get; set; }
+        public string Selector { get; set; }
+        public GopherItemType ItemType { get; set; }
+
+        public string Path
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(Selector))
+                    return Port == 70 ? Host : Host + ":" + Port;
+                return Selector;
+            }
+        }
     }
 }

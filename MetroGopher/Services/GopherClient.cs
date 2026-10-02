@@ -136,9 +136,13 @@ namespace MetroGopher.Services
                 string host = parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]) ? parts[2] : currentHost;
 
                 int port = currentPort;
-                if (parts.Length > 3 && int.TryParse(parts[3], out int parsedPort) && parsedPort > 0)
+                if (parts.Length > 3)
                 {
-                    port = parsedPort;
+                    int parsedPort;
+                    if (int.TryParse(parts[3], out parsedPort) && parsedPort > 0)
+                    {
+                        port = parsedPort;
+                    }
                 }
 
                 // Защита от заглушек серверов
