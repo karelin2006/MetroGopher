@@ -14,9 +14,14 @@ namespace MetroGopher.Services
         Search,     // '7'
         Telnet,     // '8'
         Binary,     // '9'
-        Image,      // 'g', 'I'
-        Info,       // 'i'
+        Redundant,  // '+' (дублирующий сервер)
+        Tn3270,     // 'T'
+        Image,      // 'g', 'I', ':', 'p', 'P'
+        Audio,      // 's', 'S', '<'
+        Video,      // ';'
+        Document,   // 'd', 'D', 'M'
         HtmlLink,   // 'h', 'H'
+        Info,       // 'i'
         Unknown
     }
 
@@ -28,23 +33,38 @@ namespace MetroGopher.Services
         public string Host { get; set; }
         public int Port { get; set; }
 
-        public bool IsClickable => ItemType != GopherItemType.Info && ItemType != GopherItemType.Unknown;
+        // Элемент кликабелен, если это не инфо-строка и не ошибка сервера
+        public bool IsClickable => ItemType != GopherItemType.Info &&
+                                   ItemType != GopherItemType.Error &&
+                                   ItemType != GopherItemType.Unknown;
 
-        public bool IsInfo => ItemType == GopherItemType.Info || ItemType == GopherItemType.Unknown;
+        public bool IsInfo => ItemType == GopherItemType.Info;
+        public bool IsError => ItemType == GopherItemType.Error;
 
+        // Корректные символы шрифта Segoe UI Symbol (стандарт Windows Phone 8.1)
         public string Symbol
         {
             get
             {
                 switch (ItemType)
                 {
-                    case GopherItemType.Directory: return "\uE14C";
-                    case GopherItemType.TextFile: return "\uE160";
-                    case GopherItemType.Search: return "\uE11A";
-                    case GopherItemType.Image: return "\uE114";
-                    case GopherItemType.Binary: return "\uE125";
-                    case GopherItemType.HtmlLink: return "\uE128";
-                    default: return "\uE128";
+                    case GopherItemType.Directory: return "\uE188"; // Папка
+                    case GopherItemType.TextFile: return "\uE160"; // Документ
+                    case GopherItemType.Search: return "\uE11A"; // Лупа
+                    case GopherItemType.Image: return "\uE114"; // Картинка
+                    case GopherItemType.Audio: return "\uE189"; // Звук / медиа
+                    case GopherItemType.Video: return "\uE116"; // Видео
+                    case GopherItemType.HtmlLink: return "\uE12B"; // Глобус / Веб-ссылка
+                    case GopherItemType.Binary:
+                    case GopherItemType.DosBinary:
+                    case GopherItemType.BinHex:
+                    case GopherItemType.Uuencoded:
+                    case GopherItemType.Document: return "\uE118"; // Загрузка / файл
+                    case GopherItemType.Telnet:
+                    case GopherItemType.Tn3270: return "\uE1D1"; // Терминал / консоль
+                    case GopherItemType.CSOPhone: return "\uE13A"; // Телефонная книга
+                    case GopherItemType.Error: return "\uE10A"; // Предупреждение / Ошибка
+                    default: return string.Empty;
                 }
             }
         }

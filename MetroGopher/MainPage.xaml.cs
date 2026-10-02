@@ -5,13 +5,13 @@ using System.IO;
 using System.IO.IsolatedStorage;
 using System.Linq;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Navigation;
+using System.Windows.Media.Imaging;
 using Microsoft.Phone.Controls;
+using Microsoft.Phone.Tasks;
 using MetroGopher.Services;
 
 namespace MetroGopher
@@ -20,11 +20,11 @@ namespace MetroGopher
     {
         private readonly GopherClient _client = new GopherClient();
 
-        // Временная история ТОЛЬКО для кнопки "Назад"
+        // Временная история ТОЛЬКО для аппаратной кнопки "Назад"
         private readonly Stack<GopherHistoryItem> _historyStack = new Stack<GopherHistoryItem>();
         private bool _isNavigatingHistory = false;
 
-        private string _currentHost = "gopher.debene.dev";
+        private string _currentHost = "gopher.floodgap.com";
         private int _currentPort = 70;
         private string _currentSelector = "";
 
@@ -41,7 +41,7 @@ namespace MetroGopher
             "gopher.linkerror.com", "magical.city", "gopher.tildeverse.org",
             "gopher.icu", "gopher.top", "gopher.me",
             "phreaknet.org", "gopher.somnolescent.net", "gopher.stgraber.org",
-            "gopher.osmz.ru", "gopher.space"
+            "gopher.osmz.ru", "gopher.space", "gopher.debene.dev"
         };
 
         private ObservableCollection<GopherBookmark> _bookmarks = new ObservableCollection<GopherBookmark>();
@@ -80,6 +80,8 @@ namespace MetroGopher
             LoadGopherPage(_currentHost, _currentPort, _currentSelector);
         }
 
+        #region Отображение данных
+
         private void DisplayLongText(string text)
         {
             if (string.IsNullOrEmpty(text))
@@ -114,6 +116,10 @@ namespace MetroGopher
             DocumentListBox.ItemsSource = blocks;
             MainPivot.SelectedItem = PivotDocument;
         }
+
+        #endregion
+
+        #region Работа с хранилищем (Закладки и История)
 
         private void LoadData()
         {
@@ -165,7 +171,6 @@ namespace MetroGopher
                             int port = 70;
                             int.TryParse(parts[1], out port);
 
-                            // Читаем тип (с защитой от старых записей без типа)
                             GopherItemType itemType = GopherItemType.Directory;
                             if (parts.Length >= 4)
                             {
@@ -190,19 +195,15 @@ namespace MetroGopher
             settings[BookmarksKey] = new List<string>(
                 Bookmarks.Select(b => b.Title + "|" + b.Host + "|" + b.Port + "|" + b.Selector + "|" + b.ItemType));
 
-            // Сохраняем историю вместе с типом файла
             settings[HistoryKey] = new List<string>(
                 History.Select(h => h.Host + "|" + h.Port + "|" + h.Selector + "|" + h.ItemType));
 
             settings.Save();
         }
 
-        // НОВЫЙ МЕТОД: Универсальное сохранение любой страницы в историю
         private void SaveToPermanentHistory(string host, int port, string selector, GopherItemType type)
         {
             if (string.IsNullOrEmpty(host) || _isNavigatingHistory) return;
-
-            string fullAddress = port == 70 ? host + selector : host + ":" + port + selector;
 
             var existing = History.FirstOrDefault(h => h.Host == host && h.Port == port && h.Selector == selector);
             if (existing != null)
@@ -221,11 +222,16 @@ namespace MetroGopher
             UpdateAddressSuggestions();
         }
 
+        #endregion
+
+        #region Адресная строка и навигация
+
         private void OnGoClick(object sender, RoutedEventArgs e)
         {
             string input = AddressBox.Text.Trim();
             if (string.IsNullOrWhiteSpace(input)) return;
 
+            // Если ввели одно слово без спецсимволов — отправляем во всемирный поиск Veronica-2
             if (!input.Contains(".") && !input.Contains(":") && !input.Contains("/"))
             {
                 string searchHost = "gopher.floodgap.com";
@@ -286,22 +292,28 @@ namespace MetroGopher
             LoadingBar.Visibility = Visibility.Visible;
             _gopherItems.Clear();
 
-            if (string.IsNullOrEmpty(selector))
+            // Очищаем отображение поисковых табуляций из адресной строки для читаемости
+            string displaySelector = selector;
+            if (displaySelector.Contains("\t"))
+            {
+                displaySelector = displaySelector.Split('\t')[0];
+            }
+
+            if (string.IsNullOrEmpty(displaySelector))
                 AddressBox.Text = port == 70 ? host : host + ":" + port;
             else
-                AddressBox.Text = port == 70 ? host + selector : host + ":" + port + selector;
+                AddressBox.Text = port == 70 ? host + displaySelector : host + ":" + port + displaySelector;
 
             if (addToHistory && !_isNavigatingHistory && !string.IsNullOrEmpty(host))
             {
                 _historyStack.Push(new GopherHistoryItem { Host = host, Port = port, Selector = selector, ItemType = GopherItemType.Directory });
-
-                // Вызываем наш новый универсальный метод
                 SaveToPermanentHistory(host, port, selector, GopherItemType.Directory);
             }
 
             try
             {
-                string rawData = await _client.RawRequestAsync(host, port, selector, forceRefresh);
+                // Загружаем директорию с поддержкой различных кодировок
+                string rawData = await _client.FetchTextAsync(host, port, selector);
                 var items = _client.ParseMenu(rawData, host, port);
 
                 foreach (var item in items)
@@ -318,59 +330,294 @@ namespace MetroGopher
             }
         }
 
+        #endregion
+
+        #region Диспетчеризация форматов элементов Gopher
+
         private async void OnItemSelected(object sender, SelectionChangedEventArgs e)
         {
             var selectedItem = GopherList.SelectedItem as GopherItem;
             if (selectedItem == null) return;
 
             GopherList.SelectedItem = null;
+            await RouteGopherItemAsync(selectedItem);
+        }
 
-            switch (selectedItem.ItemType)
+        private async Task RouteGopherItemAsync(GopherItem item)
+        {
+            if (item == null || !item.IsClickable)
+                return;
+
+            switch (item.ItemType)
             {
                 case GopherItemType.Directory:
-                    LoadGopherPage(selectedItem.Host, selectedItem.Port, selectedItem.Selector);
+                    LoadGopherPage(item.Host, item.Port, item.Selector);
                     break;
 
                 case GopherItemType.TextFile:
-                    await OpenTextFileAsync(selectedItem);
+                    await OpenTextFileAsync(item);
                     break;
 
                 case GopherItemType.Search:
-                    ShowSearchDialog(selectedItem);
+                    ShowSearchDialog(item);
                     break;
 
-                case GopherItemType.Info:
+                case GopherItemType.Image:
+                    await OpenImageAsync(item);
+                    break;
+
+                case GopherItemType.HtmlLink:
+                    OpenWebLink(item);
+                    break;
+
+                case GopherItemType.Telnet:
+                case GopherItemType.Tn3270:
+                    OpenTelnet(item);
+                    break;
+
+                case GopherItemType.CSOPhone:
+                    ShowCsoDialog(item);
                     break;
 
                 case GopherItemType.Error:
-                    MessageBox.Show(selectedItem.Title ?? "Error", "Server Error", MessageBoxButton.OK);
+                    MessageBox.Show(item.Title ?? "Server reported error", "Gopher Error (Type 3)", MessageBoxButton.OK);
                     break;
 
                 case GopherItemType.Binary:
                 case GopherItemType.DosBinary:
                 case GopherItemType.BinHex:
                 case GopherItemType.Uuencoded:
-                case GopherItemType.Image:
-                    await DownloadAndSaveFileAsync(selectedItem);
+                case GopherItemType.Audio:
+                case GopherItemType.Video:
+                case GopherItemType.Document:
+                    await DownloadAndSaveFileAsync(item);
+                    break;
+
+                case GopherItemType.Info:
                     break;
 
                 case GopherItemType.Unknown:
                 default:
                     try
                     {
-                        await OpenTextFileAsync(selectedItem);
+                        await OpenTextFileAsync(item);
                     }
                     catch
                     {
                         var result = MessageBox.Show(
-                            "Unknown resource type.\nDownload as file?",
-                            selectedItem.Title ?? "File",
+                            "Неизвестный тип ресурса.\nСкачать как двоичный файл?",
+                            item.Title ?? "File",
                             MessageBoxButton.OKCancel);
 
                         if (result == MessageBoxResult.OK)
-                            await DownloadAndSaveFileAsync(selectedItem);
+                            await DownloadAndSaveFileAsync(item);
                     }
                     break;
+            }
+        }
+
+        #endregion
+
+        #region Обработчики специализированных форматов
+
+        private async Task OpenTextFileAsync(GopherItem item)
+        {
+            LoadingBar.Visibility = Visibility.Visible;
+            DocumentListBox.ItemsSource = new List<string> { "Loading..." };
+
+            SaveToPermanentHistory(item.Host, item.Port, item.Selector, item.ItemType);
+
+            try
+            {
+                string raw = await _client.FetchTextAsync(item.Host, item.Port, item.Selector);
+                string clean = _client.CleanTextContent(raw);
+
+                if (IsProbablyBinary(clean))
+                {
+                    var res = MessageBox.Show(
+                        "Файл содержит нетекстовые данные.\nСкачать как бинарный файл?",
+                        item.Title ?? "File",
+                        MessageBoxButton.OKCancel);
+
+                    if (res == MessageBoxResult.OK)
+                        await DownloadAndSaveFileAsync(item);
+
+                    DocumentListBox.ItemsSource = null;
+                    return;
+                }
+
+                DisplayLongText(clean);
+                _currentDocument = item;
+            }
+            catch (Exception ex)
+            {
+                DocumentListBox.ItemsSource = new List<string> { "Ошибка загрузки." };
+                MessageBox.Show("Не удалось открыть файл:\n" + ex.Message, "Error", MessageBoxButton.OK);
+            }
+            finally
+            {
+                LoadingBar.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private async Task OpenImageAsync(GopherItem item)
+        {
+            LoadingBar.Visibility = Visibility.Visible;
+            SaveToPermanentHistory(item.Host, item.Port, item.Selector, item.ItemType);
+
+            try
+            {
+                byte[] imgBytes = await _client.RawRequestBytesAsync(item.Host, item.Port, item.Selector);
+                if (imgBytes == null || imgBytes.Length == 0)
+                {
+                    MessageBox.Show("Сервер вернул пустое изображение.", "Image Viewer", MessageBoxButton.OK);
+                    return;
+                }
+
+                var bitmap = new BitmapImage();
+                using (var ms = new MemoryStream(imgBytes))
+                {
+                    bitmap.SetSource(ms);
+                }
+
+                var imageControl = new Image
+                {
+                    Source = bitmap,
+                    Stretch = System.Windows.Media.Stretch.Uniform,
+                    MaxHeight = 600
+                };
+
+                var scroll = new ScrollViewer
+                {
+                    Content = imageControl,
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+                };
+
+                var imageDialog = new CustomMessageBox
+                {
+                    Caption = item.Title ?? "IMAGE VIEWER",
+                    Message = $"{bitmap.PixelWidth}x{bitmap.PixelHeight} ({FormatSize(imgBytes.Length)})",
+                    Content = scroll,
+                    LeftButtonContent = "save",
+                    RightButtonContent = "close"
+                };
+
+                imageDialog.Dismissed += async (s, ev) =>
+                {
+                    if (ev.Result == CustomMessageBoxResult.LeftButton)
+                    {
+                        await DownloadAndSaveFileAsync(item);
+                    }
+                };
+
+                imageDialog.Show();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Не удалось загрузить картинку:\n" + ex.Message, "Image Error", MessageBoxButton.OK);
+            }
+            finally
+            {
+                LoadingBar.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private void OpenWebLink(GopherItem item)
+        {
+            string url = item.Selector;
+            if (string.IsNullOrWhiteSpace(url)) return;
+
+            if (url.StartsWith("URL:", StringComparison.OrdinalIgnoreCase))
+                url = url.Substring(4);
+
+            if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                url = "http://" + url;
+            }
+
+            try
+            {
+                var webBrowserTask = new WebBrowserTask { Uri = new Uri(url, UriKind.Absolute) };
+                webBrowserTask.Show();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Неверная ссылка:\n" + ex.Message, "Browser Error", MessageBoxButton.OK);
+            }
+        }
+
+        private async void OpenTelnet(GopherItem item)
+        {
+            string telnetUri = $"telnet://{item.Host}:{item.Port}";
+            try
+            {
+                // Попытка запустить ассоциированное приложение в системе
+                await Windows.System.Launcher.LaunchUriAsync(new Uri(telnetUri));
+            }
+            catch
+            {
+                // Если эмулятор telnet не установлен — показываем реквизиты сессии (RFC 1436 разд. 3.8)
+                MessageBox.Show(
+                    $"Сессия Telnet:\nХост: {item.Host}\nПорт: {item.Port}\nЛогин/селектор: {item.Selector}\n\nДля подключения воспользуйтесь внешним клиентом Telnet.",
+                    "Telnet Connection",
+                    MessageBoxButton.OK);
+            }
+        }
+
+        private void ShowCsoDialog(GopherItem item)
+        {
+            var searchInput = new TextBox
+            {
+                Margin = new Thickness(0, 10, 0, 0),
+                InputScope = new InputScope
+                {
+                    Names = { new InputScopeName { NameValue = InputScopeNameValue.Search } }
+                }
+            };
+            searchInput.Loaded += (s, ev) => searchInput.Focus();
+
+            var dialog = new CustomMessageBox
+            {
+                Caption = "CSO PHONEBOOK (RFC 1436)",
+                Message = $"Поиск абонента на {item.Host}:",
+                Content = searchInput,
+                LeftButtonContent = "search",
+                RightButtonContent = "cancel"
+            };
+
+            dialog.Dismissed += async (s, ev) =>
+            {
+                if (ev.Result == CustomMessageBoxResult.LeftButton)
+                {
+                    string query = searchInput.Text.Trim();
+                    if (!string.IsNullOrEmpty(query))
+                    {
+                        await QueryCsoServerAsync(item.Host, item.Port, query);
+                    }
+                }
+            };
+            dialog.Show();
+        }
+
+        private async Task QueryCsoServerAsync(string host, int port, string query)
+        {
+            LoadingBar.Visibility = Visibility.Visible;
+            try
+            {
+                // Команда протокола CSO: "query <запрос>"
+                string csoQuery = "query " + query;
+                string result = await _client.FetchTextAsync(host, port, csoQuery);
+                DisplayLongText(result);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Ошибка CSO сервера:\n" + ex.Message, "CSO Error", MessageBoxButton.OK);
+            }
+            finally
+            {
+                LoadingBar.Visibility = Visibility.Collapsed;
             }
         }
 
@@ -388,8 +635,8 @@ namespace MetroGopher
 
             var searchDialog = new CustomMessageBox
             {
-                Caption = "GOPHER SEARCH",
-                Message = string.IsNullOrEmpty(selectedItem.Title) ? "Enter query:" : selectedItem.Title,
+                Caption = "GOPHER SEARCH (TYPE 7)",
+                Message = string.IsNullOrEmpty(selectedItem.Title) ? "Введите поисковый запрос:" : selectedItem.Title,
                 Content = searchInput,
                 LeftButtonContent = "search",
                 RightButtonContent = "cancel"
@@ -402,6 +649,7 @@ namespace MetroGopher
                     string query = searchInput.Text.Trim();
                     if (!string.IsNullOrEmpty(query))
                     {
+                        // Согласно RFC 1436: <selector>\t<query>
                         string searchSelector = selectedItem.Selector + "\t" + query;
                         LoadGopherPage(selectedItem.Host, selectedItem.Port, searchSelector);
                     }
@@ -410,67 +658,13 @@ namespace MetroGopher
             searchDialog.Show();
         }
 
-        private async Task OpenTextFileAsync(GopherItem item)
-        {
-            LoadingBar.Visibility = Visibility.Visible;
-            DocumentListBox.ItemsSource = new List<string> { "Loading..." };
+        #endregion
 
-            // Документ также добавляется в историю!
-            SaveToPermanentHistory(item.Host, item.Port, item.Selector, item.ItemType);
-
-            try
-            {
-                string raw = await _client.RawRequestAsync(item.Host, item.Port, item.Selector);
-                string clean = _client.CleanTextContent(raw);
-
-                if (IsProbablyBinary(clean))
-                {
-                    var res = MessageBox.Show(
-                        "This does not look like a text file.\nDownload as binary?",
-                        item.Title ?? "File",
-                        MessageBoxButton.OKCancel);
-
-                    if (res == MessageBoxResult.OK)
-                        await DownloadAndSaveFileAsync(item);
-
-                    DocumentListBox.ItemsSource = null;
-                    return;
-                }
-
-                DisplayLongText(clean);
-                _currentDocument = item;
-            }
-            catch (Exception ex)
-            {
-                DocumentListBox.ItemsSource = new List<string> { "Load failed." };
-                MessageBox.Show("Failed to open file:\n" + ex.Message, "Error", MessageBoxButton.OK);
-            }
-            finally
-            {
-                LoadingBar.Visibility = Visibility.Collapsed;
-            }
-        }
-
-        private bool IsProbablyBinary(string text)
-        {
-            if (string.IsNullOrEmpty(text)) return false;
-
-            int bad = 0;
-            int checkLen = Math.Min(text.Length, 2048);
-            for (int i = 0; i < checkLen; i++)
-            {
-                char c = text[i];
-                if (c == 0 || (c < 32 && c != '\n' && c != '\r' && c != '\t'))
-                    bad++;
-            }
-            return bad > checkLen / 20;
-        }
+        #region Загрузка бинарных файлов и сохранение
 
         private async Task DownloadAndSaveFileAsync(GopherItem item)
         {
             LoadingBar.Visibility = Visibility.Visible;
-
-            // Скачивания файлов тоже добавляются в историю!
             SaveToPermanentHistory(item.Host, item.Port, item.Selector, item.ItemType);
 
             try
@@ -501,13 +695,13 @@ namespace MetroGopher
                 }
 
                 MessageBox.Show(
-                    "File saved:\n" + fileName + "\n\nSize: " + FormatSize(data.Length),
-                    "Download Complete",
+                    "Файл сохранен в Downloads:\n" + fileName + "\n\nРазмер: " + FormatSize(data.Length),
+                    "Загрузка завершена",
                     MessageBoxButton.OK);
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Download error:\n" + ex.Message, "Error", MessageBoxButton.OK);
+                MessageBox.Show("Ошибка скачивания:\n" + ex.Message, "Error", MessageBoxButton.OK);
             }
             finally
             {
@@ -532,9 +726,13 @@ namespace MetroGopher
                 switch (type)
                 {
                     case GopherItemType.Image: ext = ".jpg"; break;
+                    case GopherItemType.Audio: ext = ".mp3"; break;
+                    case GopherItemType.Video: ext = ".mp4"; break;
                     case GopherItemType.Binary:
                     case GopherItemType.DosBinary: ext = ".bin"; break;
                     case GopherItemType.BinHex: ext = ".hqx"; break;
+                    case GopherItemType.Uuencoded: ext = ".uue"; break;
+                    case GopherItemType.Document: ext = ".pdf"; break;
                     default: ext = ".dat"; break;
                 }
                 title += ext;
@@ -549,6 +747,25 @@ namespace MetroGopher
             if (bytes < 1024 * 1024) return (bytes / 1024.0).ToString("0.0") + " KB";
             return (bytes / (1024.0 * 1024.0)).ToString("0.00") + " MB";
         }
+
+        private bool IsProbablyBinary(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return false;
+
+            int bad = 0;
+            int checkLen = Math.Min(text.Length, 2048);
+            for (int i = 0; i < checkLen; i++)
+            {
+                char c = text[i];
+                if (c == 0 || (c < 32 && c != '\n' && c != '\r' && c != '\t'))
+                    bad++;
+            }
+            return bad > checkLen / 20;
+        }
+
+        #endregion
+
+        #region Управление Pivot, История, Закладки
 
         protected override void OnBackKeyPress(System.ComponentModel.CancelEventArgs e)
         {
@@ -631,13 +848,13 @@ namespace MetroGopher
 
             try
             {
-                string raw = await _client.RawRequestAsync(_currentDocument.Host, _currentDocument.Port, _currentDocument.Selector, true);
+                string raw = await _client.FetchTextAsync(_currentDocument.Host, _currentDocument.Port, _currentDocument.Selector);
                 string clean = _client.CleanTextContent(raw);
 
                 if (IsProbablyBinary(clean))
                 {
                     var res = MessageBox.Show(
-                        "This does not look like a text file.\nDownload as binary?",
+                        "Файл не является текстовым.\nСкачать как бинарный?",
                         _currentDocument.Title ?? "File",
                         MessageBoxButton.OKCancel);
 
@@ -653,7 +870,7 @@ namespace MetroGopher
             catch (Exception ex)
             {
                 DocumentListBox.ItemsSource = new List<string> { "Load failed." };
-                MessageBox.Show("Failed to refresh document:\n" + ex.Message, "Error", MessageBoxButton.OK);
+                MessageBox.Show("Не удалось обновить документ:\n" + ex.Message, "Error", MessageBoxButton.OK);
             }
             finally
             {
@@ -667,7 +884,7 @@ namespace MetroGopher
 
             try
             {
-                string raw = await _client.RawRequestAsync(_currentDocument.Host, _currentDocument.Port, _currentDocument.Selector, true);
+                string raw = await _client.FetchTextAsync(_currentDocument.Host, _currentDocument.Port, _currentDocument.Selector);
                 string clean = _client.CleanTextContent(raw);
 
                 if (!IsProbablyBinary(clean))
@@ -677,7 +894,7 @@ namespace MetroGopher
             }
             catch
             {
-                // Тихо игнорируем сетевые сбои
+                // Подавляем фоновые ошибки
             }
         }
 
@@ -713,7 +930,7 @@ namespace MetroGopher
             SaveData();
             UpdateAddressSuggestions();
 
-            MessageBox.Show("Page added to bookmarks!", "Bookmarks", MessageBoxButton.OK);
+            MessageBox.Show("Страница сохранена в закладки!", "Закладки", MessageBoxButton.OK);
         }
 
         private void OnPivotSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -753,40 +970,16 @@ namespace MetroGopher
 
             MainPivot.SelectedIndex = 0;
 
-            switch (bm.ItemType)
+            var item = new GopherItem
             {
-                case GopherItemType.TextFile:
-                    var textItem = new GopherItem
-                    {
-                        Title = bm.Title,
-                        Host = bm.Host,
-                        Port = bm.Port,
-                        Selector = bm.Selector,
-                        ItemType = GopherItemType.TextFile
-                    };
-                    await OpenTextFileAsync(textItem);
-                    break;
+                Title = bm.Title,
+                Host = bm.Host,
+                Port = bm.Port,
+                Selector = bm.Selector,
+                ItemType = bm.ItemType
+            };
 
-                case GopherItemType.Binary:
-                case GopherItemType.DosBinary:
-                case GopherItemType.BinHex:
-                case GopherItemType.Uuencoded:
-                case GopherItemType.Image:
-                    var binItem = new GopherItem
-                    {
-                        Title = bm.Title,
-                        Host = bm.Host,
-                        Port = bm.Port,
-                        Selector = bm.Selector,
-                        ItemType = bm.ItemType
-                    };
-                    await DownloadAndSaveFileAsync(binItem);
-                    break;
-
-                default:
-                    LoadGopherPage(bm.Host, bm.Port, bm.Selector);
-                    break;
-            }
+            await RouteGopherItemAsync(item);
         }
 
         private void OnDeleteBookmarkClick(object sender, RoutedEventArgs e)
@@ -814,7 +1007,6 @@ namespace MetroGopher
             HistoryList.ItemsSource = History;
         }
 
-        // ОБНОВЛЕННЫЙ МЕТОД: Умеет открывать и папки, и документы из истории
         private async void OnHistorySelected(object sender, RoutedEventArgs e)
         {
             var button = sender as Button;
@@ -834,46 +1026,7 @@ namespace MetroGopher
                 ItemType = item.ItemType
             };
 
-            switch (simulatedItem.ItemType)
-            {
-                case GopherItemType.Directory:
-                    LoadGopherPage(simulatedItem.Host, simulatedItem.Port, simulatedItem.Selector);
-                    break;
-
-                case GopherItemType.TextFile:
-                    await OpenTextFileAsync(simulatedItem);
-                    break;
-
-                case GopherItemType.Search:
-                    ShowSearchDialog(simulatedItem);
-                    break;
-
-                case GopherItemType.Binary:
-                case GopherItemType.DosBinary:
-                case GopherItemType.BinHex:
-                case GopherItemType.Uuencoded:
-                case GopherItemType.Image:
-                    await DownloadAndSaveFileAsync(simulatedItem);
-                    break;
-
-                case GopherItemType.Unknown:
-                default:
-                    try
-                    {
-                        await OpenTextFileAsync(simulatedItem);
-                    }
-                    catch
-                    {
-                        var result = MessageBox.Show(
-                            "Unknown resource type.\nDownload as file?",
-                            simulatedItem.Title ?? "File",
-                            MessageBoxButton.OKCancel);
-
-                        if (result == MessageBoxResult.OK)
-                            await DownloadAndSaveFileAsync(simulatedItem);
-                    }
-                    break;
-            }
+            await RouteGopherItemAsync(simulatedItem);
         }
 
         private void OnDeleteHistoryItemClick(object sender, RoutedEventArgs e)
@@ -916,8 +1069,7 @@ namespace MetroGopher
             }
 
             AddressBox.Text = "";
-
-            string homeHost = "gopher.debene.dev";
+            string homeHost = "gopher.floodgap.com";
             int homePort = 70;
             string homeSelector = "";
 
@@ -927,23 +1079,7 @@ namespace MetroGopher
         private void MainPivot_Loaded(object sender, RoutedEventArgs e)
         {
         }
-    }
 
-    public class GopherHistoryItem
-    {
-        public string Host { get; set; }
-        public int Port { get; set; }
-        public string Selector { get; set; }
-        public GopherItemType ItemType { get; set; } // Добавили тип для истории!
-
-        public string Path
-        {
-            get
-            {
-                if (string.IsNullOrEmpty(Selector))
-                    return Port == 70 ? Host : Host + ":" + Port;
-                return Selector;
-            }
-        }
+        #endregion
     }
 }

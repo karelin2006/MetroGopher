@@ -12,21 +12,42 @@ namespace MetroGopher.Services
 {
     public class GopherClient
     {
-        public async Task<string> RawRequestAsync(string host, int port, string selector, bool forceRefresh = false)
+        private const int DefaultTimeoutSeconds = 15;
+
+        /// <summary>
+        /// Выполняет текстовый запрос (для меню и текстовых файлов RFC 1436)
+        /// </summary>
+        public async Task<string> FetchTextAsync(string host, int port, string selector, string searchQuery = null)
         {
-            byte[] data = await RawRequestBytesAsync(host, port, selector);
+            byte[] data = await RawRequestBytesAsync(host, port, selector, searchQuery);
             if (data == null || data.Length == 0)
                 return string.Empty;
 
-            return Encoding.UTF8.GetString(data, 0, data.Length);
+            // Сначала пробуем декодировать как UTF-8. Если есть невалидные последовательности — берем ISO-8859-1 (Latin1)
+            try
+            {
+                var utf8Strict = new UTF8Encoding(false, true);
+                return utf8Strict.GetString(data, 0, data.Length);
+            }
+            catch (DecoderFallbackException)
+            {
+                // Fallback на стандартную кодировку классического Gopher (RFC 1436)
+                return Encoding.GetEncoding("ISO-8859-1").GetString(data, 0, data.Length);
+            }
         }
 
-        public async Task<byte[]> RawRequestBytesAsync(string host, int port, string selector)
+        /// <summary>
+        /// Выполняет сырой запрос байтов (для картинок, бинарников, аудио и меню)
+        /// </summary>
+        public async Task<byte[]> RawRequestBytesAsync(string host, int port, string selector, string searchQuery = null)
         {
             if (string.IsNullOrWhiteSpace(host))
-                throw new ArgumentException("Host is empty");
+                throw new ArgumentException("Хост не может быть пустым.");
 
-            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+            if (port <= 0)
+                port = 70;
+
+            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(DefaultTimeoutSeconds)))
             using (var socket = new StreamSocket())
             {
                 socket.Control.NoDelay = true;
@@ -35,7 +56,14 @@ namespace MetroGopher.Services
                 {
                     await socket.ConnectAsync(new HostName(host), port.ToString()).AsTask(cts.Token);
 
-                    string request = (selector ?? string.Empty) + "\r\n";
+                    // Если это поиск (Type 7) — отправляется <selector>\t<query>\r\n (RFC 1436, разд. 3.7.2)
+                    string request = selector ?? string.Empty;
+                    if (!string.IsNullOrEmpty(searchQuery))
+                    {
+                        request += "\t" + searchQuery;
+                    }
+                    request += "\r\n";
+
                     byte[] requestBytes = Encoding.UTF8.GetBytes(request);
 
                     using (var writer = new DataWriter(socket.OutputStream))
@@ -49,33 +77,36 @@ namespace MetroGopher.Services
                     using (var reader = new DataReader(socket.InputStream))
                     {
                         reader.InputStreamOptions = InputStreamOptions.Partial;
-                        var ms = new MemoryStream();
-
-                        while (true)
+                        using (var ms = new MemoryStream())
                         {
-                            uint loaded = await reader.LoadAsync(64 * 1024).AsTask(cts.Token);
-                            if (loaded == 0)
-                                break;
+                            while (true)
+                            {
+                                uint loaded = await reader.LoadAsync(64 * 1024).AsTask(cts.Token);
+                                if (loaded == 0)
+                                    break;
 
-                            byte[] chunk = new byte[loaded];
-                            reader.ReadBytes(chunk);
-                            ms.Write(chunk, 0, (int)loaded);
+                                byte[] chunk = new byte[loaded];
+                                reader.ReadBytes(chunk);
+                                ms.Write(chunk, 0, (int)loaded);
+                            }
+                            return ms.ToArray();
                         }
-
-                        return ms.ToArray();
                     }
                 }
                 catch (TaskCanceledException)
                 {
-                    throw new TimeoutException($"Сервер {host} не ответил за 15 секунд. Возможно, он отключен.");
+                    throw new TimeoutException($"Сервер {host}:{port} не ответил вовремя.");
                 }
                 catch (Exception ex)
                 {
-                    throw new Exception($"Ошибка сети ({host}): {ex.Message}");
+                    throw new Exception($"Сетевая ошибка ({host}): {ex.Message}");
                 }
             }
         }
 
+        /// <summary>
+        /// Парсинг директории (Type 1) согласно RFC 1436
+        /// </summary>
         public List<GopherItem> ParseMenu(string rawResponse, string currentHost, int currentPort)
         {
             var items = new List<GopherItem>();
@@ -85,35 +116,41 @@ namespace MetroGopher.Services
             var lines = rawResponse.Replace("\r\n", "\n").Replace('\r', '\n')
                                    .Split(new[] { '\n' }, StringSplitOptions.None);
 
-            string pendingInfo = null;
+            GopherItem lastNonRedundantItem = null;
 
             foreach (var rawLine in lines)
             {
-                string line = rawLine;
-                if (string.IsNullOrEmpty(line) || line == ".")
+                if (string.IsNullOrEmpty(rawLine))
                     continue;
 
-                if (line.Length < 1)
-                    continue;
+                // Точка на отдельной строке — маркер конца меню в RFC 1436
+                if (rawLine == ".")
+                    break;
 
-                char typeChar = line[0];
-                string rest = line.Length > 1 ? line.Substring(1) : string.Empty;
+                char typeChar = rawLine[0];
+                string rest = rawLine.Length > 1 ? rawLine.Substring(1) : string.Empty;
                 string[] parts = rest.Split('\t');
 
                 string title = parts.Length > 0 ? parts[0] : string.Empty;
                 string selector = parts.Length > 1 ? parts[1] : string.Empty;
-                string host = parts.Length > 2 ? parts[2] : currentHost;
-                int port = currentPort;
+                string host = parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]) ? parts[2] : currentHost;
 
-                if (parts.Length > 3)
+                int port = currentPort;
+                if (parts.Length > 3 && int.TryParse(parts[3], out int parsedPort) && parsedPort > 0)
                 {
-                    int parsedPort;
-                    if (int.TryParse(parts[3], out parsedPort) && parsedPort > 0)
-                        port = parsedPort;
+                    port = parsedPort;
+                }
+
+                // Защита от заглушек серверов
+                if (host.Equals("null.host", StringComparison.OrdinalIgnoreCase) ||
+                    host.Equals("error.host", StringComparison.OrdinalIgnoreCase))
+                {
+                    host = currentHost;
                 }
 
                 var itemType = MapType(typeChar);
 
+                // Обработка веб-ссылок (URL:...)
                 if (itemType == GopherItemType.HtmlLink)
                 {
                     if (selector.StartsWith("URL:", StringComparison.OrdinalIgnoreCase))
@@ -122,88 +159,72 @@ namespace MetroGopher.Services
                     }
                 }
 
-                if (itemType == GopherItemType.Info)
+                // Обработка типа '+' (Redundant server - RFC 1436, разд. 3.8)
+                if (typeChar == '+' && lastNonRedundantItem != null)
                 {
-                    if (!string.IsNullOrWhiteSpace(title))
-                    {
-                        if (pendingInfo == null)
-                            pendingInfo = title;
-                        else
-                            pendingInfo += "\n" + title;
-                    }
-                    continue;
+                    itemType = lastNonRedundantItem.ItemType;
+                    if (string.IsNullOrEmpty(selector))
+                        selector = lastNonRedundantItem.Selector;
                 }
 
-                if (pendingInfo != null)
-                {
-                    items.Add(new GopherItem
-                    {
-                        ItemType = GopherItemType.Info,
-                        Title = pendingInfo,
-                        Host = currentHost,
-                        Port = currentPort,
-                        Selector = ""
-                    });
-                    pendingInfo = null;
-                }
-
-                if (string.IsNullOrWhiteSpace(host) ||
-                    host.Equals("null.host", StringComparison.OrdinalIgnoreCase) ||
-                    host.Equals("error.host", StringComparison.OrdinalIgnoreCase))
-                {
-                    host = currentHost;
-                }
-
-                if (port <= 0)
-                    port = currentPort;
-
-                items.Add(new GopherItem
+                var item = new GopherItem
                 {
                     ItemType = itemType,
                     Title = title,
                     Selector = selector,
                     Host = host,
                     Port = port
-                });
-            }
+                };
 
-            if (pendingInfo != null)
-            {
-                items.Add(new GopherItem
+                items.Add(item);
+
+                if (typeChar != '+')
                 {
-                    ItemType = GopherItemType.Info,
-                    Title = pendingInfo,
-                    Host = currentHost,
-                    Port = currentPort,
-                    Selector = ""
-                });
+                    lastNonRedundantItem = item;
+                }
             }
 
             return items;
         }
 
+        /// <summary>
+        /// Очистка текста документа (разэкранирование точек и удаление Lastline)
+        /// </summary>
         public string CleanTextContent(string raw)
         {
             if (string.IsNullOrEmpty(raw))
-                return raw;
+                return string.Empty;
 
-            // Нормализуем переносы строк для Windows Phone
-            string cleaned = raw.Replace("\r\n", "\n").Replace('\r', '\n');
+            var lines = raw.Replace("\r\n", "\n").Replace('\r', '\n')
+                           .Split(new[] { '\n' }, StringSplitOptions.None);
 
-            cleaned = cleaned.TrimEnd();
-            if (cleaned.EndsWith("\n."))
-                cleaned = cleaned.Substring(0, cleaned.Length - 2);
-            else if (cleaned.EndsWith("."))
-                cleaned = cleaned.Substring(0, cleaned.Length - 1);
+            var sb = new StringBuilder();
 
-            return cleaned;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+
+                // Последняя строка с точкой означает завершение TextFile Entity (RFC 1436, стр. 26)
+                if (line == "." && i == lines.Length - 1)
+                    break;
+
+                // Согласно RFC 1436: если строка начинается с точки, сервер удваивает её (.. -> .)
+                if (line.StartsWith(".."))
+                {
+                    line = line.Substring(1);
+                }
+
+                sb.AppendLine(line);
+            }
+
+            return sb.ToString().TrimEnd('\r', '\n');
         }
 
         private GopherItemType MapType(char typeChar)
         {
             switch (typeChar)
             {
-                // Базовые типы RFC 1436
+                // RFC 1436 базовые типы
                 case '0': return GopherItemType.TextFile;
                 case '1': return GopherItemType.Directory;
                 case '2': return GopherItemType.CSOPhone;
@@ -214,48 +235,44 @@ namespace MetroGopher.Services
                 case '7': return GopherItemType.Search;
                 case '8': return GopherItemType.Telnet;
                 case '9': return GopherItemType.Binary;
+                case '+': return GopherItemType.Redundant;
+                case 'T': return GopherItemType.Tn3270;
 
-                // Зеркальные серверы
-                case '+': return GopherItemType.Directory;
-                // Терминальные сессии (tn3270)
-                case 'T': return GopherItemType.Telnet;
-
-                // Изображения (Gopher+)
-                case 'g': // GIF
-                case 'I': // Изображение любого типа
-                case 'p': // PNG или PDF (в зависимости от сервера)
-                case 'P': // Альтернативный маркер PNG/PDF
-                case ':': // Bitmap-картинки
+                // Расширения изображений
+                case 'g':
+                case 'I':
+                case 'p':
+                case ':':
                     return GopherItemType.Image;
 
-                // Аудио форматы (.wav, .au, .mp3, .ogg)
+                // Аудио
                 case 's':
                 case 'S':
                 case '<':
-                    return GopherItemType.Binary; // Скачиваем аудио как файл
+                    return GopherItemType.Audio;
 
-                // Видео форматы (Movie)
+                // Видео
                 case ';':
-                    return GopherItemType.Binary; // Скачиваем видео как файл
+                    return GopherItemType.Video;
 
-                // Документы (Word, RTF, загружаемые PDF) и архивы MIME
+                // Документы и архивы
                 case 'd':
                 case 'D':
-                case 'M': // MIME multipart
-                    return GopherItemType.Binary; // Безопаснее всего просто скачать
+                case 'P': // PDF
+                case 'M':
+                    return GopherItemType.Document;
 
-                // Веб-ссылки и HTML-документы
+                // HTML и ссылки
                 case 'h':
                 case 'H':
                     return GopherItemType.HtmlLink;
 
-                // Информационные строки
-                case 'i': return GopherItemType.Info;
+                // Информационный текст
+                case 'i':
+                    return GopherItemType.Info;
 
-                // Структурированные текстовые данные (XML и т.д.)
-                case 'x': return GopherItemType.TextFile; // Показываем как текст
-
-                default: return GopherItemType.Unknown;
+                default:
+                    return GopherItemType.Unknown;
             }
         }
     }
