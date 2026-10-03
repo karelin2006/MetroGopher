@@ -15,13 +15,22 @@
     shell:SystemTray.IsVisible="True">
 
     <Grid x:Name="LayoutRoot" Background="Transparent">
-        <MediaElement x:Name="AudioPlayer" AutoPlay="True" Volume="1.0" Visibility="Collapsed" />
+        <!-- Скрытый движок воспроизведения -->
+        <MediaElement x:Name="AudioPlayer" 
+                      AutoPlay="True" 
+                      Volume="1.0" 
+                      Visibility="Collapsed" 
+                      MediaOpened="AudioPlayer_MediaOpened"
+                      MediaEnded="AudioPlayer_MediaEnded"
+                      MediaFailed="AudioPlayer_MediaFailed" />
+
         <ProgressBar x:Name="LoadingBar" 
                      IsIndeterminate="True" 
                      Visibility="Collapsed" 
                      VerticalAlignment="Top" 
                      Margin="0,-10,0,0"/>
 
+        <!-- ОСНОВНОЙ КОНТЕНТ (PIVOT) -->
         <phone:Pivot x:Name="MainPivot" Title="METROGOPHER" SelectionChanged="OnPivotSelectionChanged" Loaded="MainPivot_Loaded">
 
             <!-- Tab 1: Gophermap / List -->
@@ -38,7 +47,6 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
-                        <!-- Умный поиск с увеличенным шрифтом -->
                         <toolkit:AutoCompleteBox x:Name="AddressBox" 
                                                  InputScope="Url" 
                                                  Margin="-12,0,0,0"
@@ -109,7 +117,7 @@
                 </Grid>
             </phone:PivotItem>
 
-            <!-- Tab 2: Bookmarks (METRO UI REDESIGN) -->
+            <!-- Tab 2: Bookmarks -->
             <phone:PivotItem Header="bookmarks">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -135,7 +143,6 @@
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
 
-                                    <!-- Кнопка перехода с чистым шаблоном (без рамок) -->
                                     <Button Grid.Column="0"
                                             Click="OnBookmarkSelected"
                                             Tag="{Binding}"
@@ -165,7 +172,6 @@
                                         </StackPanel>
                                     </Button>
 
-                                    <!-- Иконка удаления (Стиль: корзина) -->
                                     <Button Grid.Column="1" 
                                             Click="OnDeleteBookmarkClick" 
                                             Tag="{Binding}" 
@@ -198,7 +204,7 @@
                 </Grid>
             </phone:PivotItem>
 
-            <!-- Tab 3: History (METRO UI REDESIGN) -->
+            <!-- Tab 3: History -->
             <phone:PivotItem Header="history">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -224,7 +230,6 @@
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
 
-                                    <!-- Кнопка перехода с двухстрочным оформлением (как в закладках) -->
                                     <Button Grid.Column="0"
                                             Click="OnHistorySelected"
                                             Tag="{Binding}"
@@ -240,7 +245,6 @@
                                         </Button.Template>
 
                                         <StackPanel Margin="0">
-                                            <!-- Основной текст (полный адрес или путь) -->
                                             <TextBlock Text="{Binding Path}" 
                                                        FontFamily="{StaticResource PhoneFontFamilySemiLight}"
                                                        FontSize="28"
@@ -248,7 +252,6 @@
                                                        TextWrapping="NoWrap" 
                                                        TextTrimming="WordEllipsis"
                                                        Foreground="{StaticResource PhoneForegroundBrush}"/>
-                                            <!-- Подзаголовок (Хост) акцентным цветом -->
                                             <TextBlock Text="{Binding Host}" 
                                                        Style="{StaticResource PhoneTextSubtleStyle}" 
                                                        Margin="2,0,0,0"
@@ -256,7 +259,6 @@
                                         </StackPanel>
                                     </Button>
 
-                                    <!-- Иконка удаления (корзина) -->
                                     <Button Grid.Column="1" 
                                             Click="OnDeleteHistoryItemClick" 
                                             Tag="{Binding}" 
@@ -289,12 +291,12 @@
                 </Grid>
             </phone:PivotItem>
 
-            <!-- Tab 4: Document Viewer (Без горизонтального скролла) -->
+            <!-- Tab 4: Document Viewer -->
             <phone:PivotItem Header="document" x:Name="PivotDocument">
                 <ListBox x:Name="DocumentListBox" 
-             Margin="10,0,10,0"
-             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-             ScrollViewer.VerticalScrollBarVisibility="Auto">
+                         Margin="10,0,10,0"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto">
                     <ListBox.ItemContainerStyle>
                         <Style TargetType="ListBoxItem">
                             <Setter Property="Padding" Value="0"/>
@@ -305,25 +307,103 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <TextBlock Text="{Binding Text}" 
-                           FontFamily="Consolas" 
-                           FontSize="{Binding FontSize}" 
-                           LineHeight="{Binding LineHeight}"
-                           TextWrapping="{Binding WrappingMode}"/>
+                                       FontFamily="Consolas" 
+                                       FontSize="{Binding FontSize}" 
+                                       LineHeight="{Binding LineHeight}"
+                                       TextWrapping="{Binding WrappingMode}"/>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
             </phone:PivotItem>
         </phone:Pivot>
+
+        <!-- ВСТРОЕННЫЙ METRO-ПЛЕЕР (ПРИЖАТ К ВЕРХНЕЙ КРОМКЕ APPLICATIONBAR) -->
+        <Grid x:Name="PlayerBar" 
+              VerticalAlignment="Bottom" 
+              Height="72" 
+              Margin="0,0,0,0"
+              Background="#F2191919" 
+              Canvas.ZIndex="100" 
+              Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Тонкий акцентный прогресс загрузки -->
+            <ProgressBar x:Name="PlayerStatusProgress" 
+                         Grid.Row="0" 
+                         Height="4" 
+                         IsIndeterminate="False" 
+                         Foreground="{StaticResource PhoneAccentBrush}" 
+                         Background="Transparent" 
+                         Margin="0"/>
+
+            <Grid Grid.Row="1" Margin="14,0,8,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Инфо о треке -->
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock x:Name="TxtNowPlayingTitle" 
+                               Text="Название трека" 
+                               FontSize="20" 
+                               FontFamily="{StaticResource PhoneFontFamilySemiBold}" 
+                               TextTrimming="WordEllipsis"/>
+                    <TextBlock x:Name="TxtNowPlayingStatus" 
+                               Text="воспроизведение" 
+                               FontSize="13" 
+                               Foreground="{StaticResource PhoneSubtleBrush}"/>
+                </StackPanel>
+
+                <!-- Кнопка Play/Pause -->
+                <Button x:Name="BtnPlayPause" 
+                        Grid.Column="1" 
+                        Click="OnPlayerPlayPauseClick" 
+                        Width="64" Height="64" 
+                        Margin="4,0,0,0" Padding="0"
+                        Background="Transparent"
+                        BorderThickness="0">
+                    <TextBlock x:Name="TxtPlayPauseIcon" 
+                               Text="&#xE103;" 
+                               FontFamily="Segoe UI Symbol" 
+                               FontSize="26" 
+                               HorizontalAlignment="Center" 
+                               VerticalAlignment="Center"/>
+                </Button>
+
+                <!-- Кнопка Закрыть / Стоп -->
+                <Button x:Name="BtnClosePlayer" 
+                            Grid.Column="2" 
+                            Click="OnPlayerCloseClick" 
+                            Width="64" Height="64" 
+                            Margin="0" Padding="0" 
+                            Background="Transparent" 
+                            BorderThickness="0">
+                    <TextBlock Text="&#xE10A;" 
+                               FontFamily="Segoe UI Symbol" 
+                               FontSize="22" 
+                               Foreground="{StaticResource PhoneSubtleBrush}" 
+                               HorizontalAlignment="Center" 
+                               VerticalAlignment="Center"/>
+                </Button>
+            </Grid>
+        </Grid>
     </Grid>
 
     <!-- ApplicationBar -->
     <phone:PhoneApplicationPage.ApplicationBar>
-
-        <shell:ApplicationBar IsVisible="True" IsMenuEnabled='True' BackgroundColor="#1F1F1F" ForegroundColor="White">
+        <shell:ApplicationBar IsVisible="True" 
+                              IsMenuEnabled="True" 
+                              Opacity="1.0" 
+                              Mode="Default" 
+                              BackgroundColor="#1F1F1F" 
+                              ForegroundColor="White">
             <shell:ApplicationBarIconButton IconUri="/Assets/transport.repeat.png" Text="refresh" Click="OnRefreshClick" />
-            <!-- Новая кнопка "Домой" -->
             <shell:ApplicationBarIconButton IconUri="/Assets/outline.squares.png" Text="home" Click="OnHomeClick" />
-            <!-- Существующая кнопка "Закладки" -->
             <shell:ApplicationBarIconButton IconUri="/Assets/notes.png" Text="bookmark" Click="OnBookmarkClick" />
         </shell:ApplicationBar>
     </phone:PhoneApplicationPage.ApplicationBar>

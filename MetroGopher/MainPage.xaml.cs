@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Phone.Controls;
 using Microsoft.Phone.Tasks;
@@ -20,7 +21,7 @@ namespace MetroGopher
     {
         private readonly GopherClient _client = new GopherClient();
 
-        // Временная история ТОЛЬКО для аппаратной кнопки "Назад"
+        // Временная история для аппаратной кнопки "Назад"
         private readonly Stack<GopherHistoryItem> _historyStack = new Stack<GopherHistoryItem>();
         private bool _isNavigatingHistory = false;
 
@@ -32,16 +33,16 @@ namespace MetroGopher
 
         private readonly System.Windows.Threading.DispatcherTimer _autoRefreshTimer = new System.Windows.Threading.DispatcherTimer();
 
+        // Управление встроенным аудиоплеером
+        private IsolatedStorageFileStream _activeAudioStream = null;
+        private bool _isAudioPaused = false;
+
         private readonly string[] _knownGopherServers =
         {
-            "gopher.debene.dev", "gopher.floodgap.com", "sdf.org", "gopher.viste.fr",
-            "bitreich.org", "quux.org", "gopher.black",
-            "gopher.navigo.com", "1436.ninja", "gopher.club",
-            "gopher.ddis.ch", "gopher.fman.com", "hngopher.com",
-            "gopher.linkerror.com", "magical.city", "gopher.tildeverse.org",
-            "gopher.icu", "gopher.top", "gopher.me",
-            "phreaknet.org", "gopher.somnolescent.net", "gopher.stgraber.org",
-            "gopher.osmz.ru", "gopher.space"
+            "ezhe.ddns.net", "gopher.debene.dev", "gopher.floodgap.com", "sdf.org", "gopher.viste.fr",
+            "bitreich.org", "quux.org", "gopher.black", "gopher.navigo.com", "1436.ninja", "gopher.club",
+            "gopher.ddis.ch", "gopher.fman.com", "hngopher.com", "gopher.linkerror.com", "magical.city",
+            "gopher.tildeverse.org", "gopher.icu", "gopher.top", "phreaknet.org", "gopher.space"
         };
 
         private ObservableCollection<GopherBookmark> _bookmarks = new ObservableCollection<GopherBookmark>();
@@ -91,8 +92,6 @@ namespace MetroGopher
             }
 
             var rawLines = text.Split(new[] { '\n' }, StringSplitOptions.None);
-
-            // Умный анализатор: определяем, является ли документ ASCII-картой/схемой
             bool isAsciiMap = DetectIfAsciiMap(rawLines);
 
             var items = new List<FormattedTextLine>();
@@ -119,7 +118,6 @@ namespace MetroGopher
                 string line = lines[i];
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
-                // Характерные символы путей, стрелок, станций и ASCII-графики
                 int mapChars = line.Count(c => c == '=' || c == '|' || c == '+' || c == '-' || c == '/' || c == '\\' || c == '[' || c == ']' || c == '<' || c == '>');
 
                 if (mapChars >= 6 || line.Contains("===") || line.Contains("---") || line.Contains("..."))
@@ -432,6 +430,146 @@ namespace MetroGopher
 
         #endregion
 
+        #region Встроенный аудиоплеер (Now Playing Bar)
+
+        private async Task PlayAudioAsync(GopherItem item)
+        {
+            if (item == null) return;
+
+            // Показываем компактную плашку плеера
+            PlayerBar.Visibility = Visibility.Visible;
+            TxtNowPlayingTitle.Text = item.Title ?? "Audio Track";
+            TxtNowPlayingStatus.Text = "Загрузка потока...";
+            PlayerStatusProgress.IsIndeterminate = true;
+            UpdatePlayPauseIcon(false);
+
+            // Сбрасываем предыдущий поток
+            StopCurrentPlayback();
+
+            LoadingBar.Visibility = Visibility.Visible;
+
+            try
+            {
+                byte[] audioBytes = await _client.RawRequestBytesAsync(item.Host, item.Port, item.Selector);
+                if (audioBytes == null || audioBytes.Length == 0)
+                {
+                    TxtNowPlayingStatus.Text = "Файл пуст или недоступен";
+                    PlayerStatusProgress.IsIndeterminate = false;
+                    return;
+                }
+
+                string tempFileName = "current_playback_stream.mp3";
+                var store = IsolatedStorageFile.GetUserStoreForApplication();
+
+                if (store.FileExists(tempFileName))
+                {
+                    store.DeleteFile(tempFileName);
+                }
+
+                using (var writeStream = store.CreateFile(tempFileName))
+                {
+                    writeStream.Write(audioBytes, 0, audioBytes.Length);
+                }
+
+                // Открываем постоянный поток для MediaElement
+                _activeAudioStream = store.OpenFile(tempFileName, FileMode.Open, FileAccess.Read, FileShare.Read);
+                AudioPlayer.SetSource(_activeAudioStream);
+                AudioPlayer.Play();
+
+                _isAudioPaused = false;
+                TxtNowPlayingStatus.Text = "Воспроизведение";
+                PlayerStatusProgress.IsIndeterminate = false;
+                UpdatePlayPauseIcon(false);
+            }
+            catch (Exception ex)
+            {
+                TxtNowPlayingStatus.Text = "Ошибка воспроизведения";
+                PlayerStatusProgress.IsIndeterminate = false;
+                MessageBox.Show("Ошибка воспроизведения аудио:\n" + ex.Message, "Player Error", MessageBoxButton.OK);
+            }
+            finally
+            {
+                LoadingBar.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private void StopCurrentPlayback()
+        {
+            try
+            {
+                AudioPlayer.Stop();
+                AudioPlayer.Source = null;
+            }
+            catch { }
+
+            if (_activeAudioStream != null)
+            {
+                try
+                {
+                    _activeAudioStream.Dispose();
+                }
+                catch { }
+                _activeAudioStream = null;
+            }
+        }
+
+        private void OnPlayerPlayPauseClick(object sender, RoutedEventArgs e)
+        {
+            if (_activeAudioStream == null) return;
+
+            if (_isAudioPaused)
+            {
+                AudioPlayer.Play();
+                _isAudioPaused = false;
+                TxtNowPlayingStatus.Text = "Воспроизведение";
+                UpdatePlayPauseIcon(false);
+            }
+            else
+            {
+                AudioPlayer.Pause();
+                _isAudioPaused = true;
+                TxtNowPlayingStatus.Text = "Пауза";
+                UpdatePlayPauseIcon(true);
+            }
+        }
+
+        private void OnPlayerCloseClick(object sender, RoutedEventArgs e)
+        {
+            StopCurrentPlayback();
+            PlayerBar.Visibility = Visibility.Collapsed;
+        }
+
+        private void UpdatePlayPauseIcon(bool showPlay)
+        {
+            if (TxtPlayPauseIcon != null)
+            {
+                // Segoe UI Symbol: E102 = Play (▶), E103 = Pause (⏸)
+                TxtPlayPauseIcon.Text = showPlay ? "\uE102" : "\uE103";
+            }
+        }
+
+        private void AudioPlayer_MediaOpened(object sender, RoutedEventArgs e)
+        {
+            TxtNowPlayingStatus.Text = "Воспроизведение";
+            PlayerStatusProgress.IsIndeterminate = false;
+        }
+
+        private void AudioPlayer_MediaEnded(object sender, RoutedEventArgs e)
+        {
+            TxtNowPlayingStatus.Text = "Завершено";
+            UpdatePlayPauseIcon(true);
+            _isAudioPaused = true;
+        }
+
+        private void AudioPlayer_MediaFailed(object sender, ExceptionRoutedEventArgs e)
+        {
+            TxtNowPlayingStatus.Text = "Ошибка медиа";
+            PlayerStatusProgress.IsIndeterminate = false;
+            UpdatePlayPauseIcon(true);
+        }
+
+        #endregion
+
         #region Обработчики специализированных форматов
 
         private async Task OpenTextFileAsync(GopherItem item)
@@ -530,57 +668,6 @@ namespace MetroGopher
             catch (Exception ex)
             {
                 MessageBox.Show("Не удалось загрузить картинку:\n" + ex.Message, "Image Error", MessageBoxButton.OK);
-            }
-            finally
-            {
-                LoadingBar.Visibility = Visibility.Collapsed;
-            }
-        }
-
-        private async Task PlayAudioAsync(GopherItem item)
-        {
-            LoadingBar.Visibility = Visibility.Visible;
-            try
-            {
-                byte[] audioBytes = await _client.RawRequestBytesAsync(item.Host, item.Port, item.Selector);
-                if (audioBytes == null || audioBytes.Length == 0)
-                {
-                    MessageBox.Show("Файл пуст или недоступен.", "Audio Error", MessageBoxButton.OK);
-                    return;
-                }
-
-                string tempFileName = "temp_audio.mp3";
-                using (var store = IsolatedStorageFile.GetUserStoreForApplication())
-                {
-                    if (store.FileExists(tempFileName))
-                        store.DeleteFile(tempFileName);
-
-                    using (var stream = store.CreateFile(tempFileName))
-                    {
-                        stream.Write(audioBytes, 0, audioBytes.Length);
-                    }
-
-                    using (var readStream = store.OpenFile(tempFileName, FileMode.Open, FileAccess.Read))
-                    {
-                        AudioPlayer.SetSource(readStream);
-                        AudioPlayer.Play();
-                    }
-                }
-
-                var res = MessageBox.Show(
-                    string.Format("Играет: {0}\nРазмер: {1}\n\nОстановить воспроизведение или сохранить?",
-                        item.Title ?? "Audio", FormatSize(audioBytes.Length)),
-                    "Gopher Music Player",
-                    MessageBoxButton.OKCancel);
-
-                if (res == MessageBoxResult.Cancel)
-                {
-                    AudioPlayer.Stop();
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Ошибка воспроизведения:\n" + ex.Message, "Player Error", MessageBoxButton.OK);
             }
             finally
             {
@@ -830,6 +917,16 @@ namespace MetroGopher
 
         protected override void OnBackKeyPress(System.ComponentModel.CancelEventArgs e)
         {
+            // 1. Если играет музыка и открыта нижняя плашка плеера, закрываем плеер
+            if (PlayerBar.Visibility == Visibility.Visible)
+            {
+                StopCurrentPlayback();
+                PlayerBar.Visibility = Visibility.Collapsed;
+                e.Cancel = true;
+                return;
+            }
+
+            // 2. Если открыт текстовый документ, возвращаемся в корень
             if (MainPivot.SelectedItem == PivotDocument)
             {
                 e.Cancel = true;
@@ -839,6 +936,7 @@ namespace MetroGopher
                 return;
             }
 
+            // 3. Навигация назад по страницам Gopher
             if (_historyStack.Count > 1)
             {
                 e.Cancel = true;
@@ -955,7 +1053,7 @@ namespace MetroGopher
             }
             catch
             {
-                // Подавляем фоновые ошибки
+                // Подавляем фоновые ошибки периодического обновления
             }
         }
 
