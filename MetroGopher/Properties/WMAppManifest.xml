@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Deployment xmlns="http://schemas.microsoft.com/windowsphone/2014/deployment" AppPlatformVersion="8.1">
   <DefaultLanguage xmlns="" code="en-US" />
-  <App xmlns="" ProductID="{e79f1b47-6a8a-40e0-b4cf-19093e46a960}" Title="MetroGopher" RuntimeType="Silverlight" Version="1.0.0.0" Genre="apps.normal" Author="Goose" Description="MetroGopher is a lightweight Windows Phone Gopher client designed with a clean Metro UI. It lets you explore the Gopherverse, browse directories, read text files, and search gophermaps with minimal data usage." SDOptOut="false" BackUpOptOut="false" Publisher="Goose" PublisherID="{d3ad3fe4-798d-4b93-8777-893d09899b89}">
+  <App xmlns="" ProductID="{e79f1b47-6a8a-40e0-b4cf-19093e46a960}" Title="MetroGopher" RuntimeType="Silverlight" Version="1.1.0.0" Genre="apps.normal" Author="Goose" Description="MetroGopher is a lightweight Windows Phone Gopher client designed with a clean Metro UI. It lets you explore the Gopherverse, browse directories, read text files, and search gophermaps with minimal data usage." SDOptOut="false" BackUpOptOut="false" Publisher="Goose" PublisherID="{d3ad3fe4-798d-4b93-8777-893d09899b89}">
     <IconPath IsRelative="true" IsResource="false">Assets\ApplicationIcon.png</IconPath>
     <Capabilities>
       <Capability Name="ID_CAP_NETWORKING" />
