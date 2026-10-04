@@ -97,7 +97,6 @@
     <Compile Include="Services\GopherClient.cs" />
     <Compile Include="Services\GopherHistoryItem.cs" />
     <Compile Include="Services\GopherItem.cs" />
-    <Compile Include="Services\LocalizedStrings.cs" />
     <Compile Include="MainPage.xaml.cs">
       <DependentUpon>MainPage.xaml</DependentUpon>
     </Compile>
